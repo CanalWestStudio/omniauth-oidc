@@ -156,9 +156,9 @@ module OmniAuth
         @host ||= URI.parse(config.issuer).host
       end
 
-      # By default Returns all scopes supported by the OIDC provider
+      # get scope list from options or provider config defaults
       def scope
-        config.scopes_supported || options.scope
+        options.scope || config.scopes_supported
       end
 
       def authorization_code
