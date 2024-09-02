@@ -5,8 +5,8 @@ require_relative "lib/omniauth/oidc/version"
 Gem::Specification.new do |spec|
   spec.name = "omniauth-oidc"
   spec.version = OmniauthOidc::VERSION
-  spec.authors = []
-  spec.email = []
+  spec.authors = ['mc']
+  spec.email = ['test@example.com']
 
   spec.summary = "Omniauth strategy to authenticate and retrieve user data using OpenID Connect (OIDC)"
   spec.description = "Omniauth strategy to authenticate and retrieve user data as a client using OpenID Connect (OIDC)
