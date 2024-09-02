@@ -53,8 +53,7 @@ module OmniAuth
         end
 
         def id_token_callback_phase
-          # TODO: update for id_token response_type
-          # user_data = decode_id_token(params["id_token"]).raw_attributes
+          user_data = decode_id_token(params["id_token"]).raw_attributes
 
           define_user_info
         end
@@ -79,37 +78,12 @@ module OmniAuth
         end
 
         def define_user_info
-          env["omniauth.auth"] = AuthHash.new(
-            provider: name,
-            uid: user_info.sub,
-            info: { 
-              name: user_info.name, 
-              email: user_info.email, 
-              email_verified: user_info.email_verified 
-            },
-            extra: { raw_info: user_info },
-            credentials: {
-              id_token: @access_token.id_token,
-              token: @access_token.access_token,
-              refresh_token: @access_token.refresh_token,
-              expires_in: @access_token.expires_in,
-              scope: @access_token.scope
-            }
-          )
+          env["omniauth.auth"] = AuthHash.new(serialized_user_info_auth_hash)
           call_app!
         end
 
         def define_access_token
-          env["omniauth.auth"] = AuthHash.new(
-            provider: name,
-            credentials: {
-              id_token: @access_token.id_token,
-              token: @access_token.access_token,
-              refresh_token: @access_token.refresh_token,
-              expires_in: @access_token.expires_in,
-              scope: @access_token.scope
-            }
-          )
+          env["omniauth.auth"] = AuthHash.new(serialized_access_token_auth_hash)
           call_app!
         end
 
