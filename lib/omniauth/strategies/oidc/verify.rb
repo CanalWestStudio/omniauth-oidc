@@ -133,14 +133,19 @@ module OmniAuth
           UrlSafeBase64.decode64(str).unpack1("B*").to_i(2).to_s
         end
 
+        def decoded_id_token
+          decode_id_token(access_token.id_token).raw_attributes
+        end
+
         def user_info
           return @user_info if @user_info
 
           if access_token.id_token
-            decoded = decode_id_token(access_token.id_token).raw_attributes
+            merged_user_info = access_token.userinfo!.raw_attributes.merge(decoded_id_token)
 
             @user_info = ::OpenIDConnect::ResponseObject::UserInfo.new(
-              access_token.userinfo!.raw_attributes.merge(decoded)
+              # transform keys to ensure valid UserInfo object
+              merged_user_info.deep_transform_keys(&:underscore)
             )
           else
             @user_info = access_token.userinfo!
