@@ -53,7 +53,8 @@ module OmniAuth
         end
 
         def id_token_callback_phase
-          user_data = decode_id_token(params["id_token"]).raw_attributes
+          # TODO: update for id_token response_type
+          # user_data = decode_id_token(params["id_token"]).raw_attributes
 
           define_user_info
         end
