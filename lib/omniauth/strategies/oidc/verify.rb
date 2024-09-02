@@ -30,7 +30,11 @@ module OmniAuth
         private
 
         def fetch_key
-          @fetch_key ||= parse_jwk_key(HTTParty.get(config.jwks_uri).body)
+          parse_jwk_key(jwks_key)
+        end
+
+        def jwks_key
+          @_jwks_key ||= Transport.request('GET', config.jwks_uri, nil, nil, false)
         end
 
         def base64_decoded_jwt_secret
