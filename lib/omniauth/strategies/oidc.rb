@@ -17,8 +17,9 @@ module OmniAuth
     # OIDC strategy for omniauth
     class Oidc
       include OmniAuth::Strategy
-      include Request
       include Callback
+      include Request
+      include Serializer
       include Verify
 
       extend Forwardable
@@ -83,35 +84,11 @@ module OmniAuth
         user_info.raw_attributes[options.uid_field.to_sym] || user_info.sub
       end
 
-      info do
-        {
-          name: user_info.name,
-          email: user_info.email,
-          email_verified: user_info.email_verified,
-          first_name: user_info.given_name,
-          last_name: user_info.family_name,
-          phone: user_info.phone_number,
-          address: user_info.address
-        }
-      end
+      info { serialized_user_info }
 
-      extra do
-        {
-          claims: decoded_id_token,
-          scope: scope,
-          raw_info: user_info.raw_attributes
-        }
-      end
+      extra { serialized_extra }
 
-      credentials do
-        {
-          id_token: access_token.id_token,
-          token: access_token.access_token,
-          refresh_token: access_token.refresh_token,
-          expires_in: access_token.expires_in,
-          scope: access_token.scope
-        }
-      end
+      credentials { serialized_credentials }
 
       # Initialize OpenIDConnect Client with options
       def client
