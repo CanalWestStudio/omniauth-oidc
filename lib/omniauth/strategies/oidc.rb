@@ -48,7 +48,7 @@ module OmniAuth
       option :jwt_secret_base64
       option :client_jwk_signing_key
       option :client_x509_signing_key
-      option :scope, [:openid]
+      option :scope, [ :openid ]
       option :response_type, "code" # ['code', 'id_token']
       option :require_state, true
       option :state
@@ -96,10 +96,10 @@ module OmniAuth
       end
 
       extra do
-        { 
+        {
           claims: decoded_id_token,
           scope: scope,
-          raw_info: user_info.raw_attributes 
+          raw_info: user_info.raw_attributes
         }
       end
 
@@ -223,7 +223,7 @@ module OmniAuth
         end
 
         def message
-          [error, error_reason, error_uri].compact.join(" | ")
+          [ error, error_reason, error_uri ].compact.join(" | ")
         end
       end
     end

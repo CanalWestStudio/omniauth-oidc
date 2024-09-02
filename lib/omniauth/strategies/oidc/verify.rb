@@ -22,9 +22,9 @@ module OmniAuth
         def public_key
           @public_key ||= if configured_public_key
                             configured_public_key
-                          elsif config.jwks_uri
+          elsif config.jwks_uri
                             fetch_key
-                          end
+          end
         end
 
         private
@@ -113,9 +113,9 @@ module OmniAuth
         def configured_public_key
           @configured_public_key ||= if options.client_jwk_signing_key
                                        parse_jwk_key(options.client_jwk_signing_key)
-                                     elsif options.client_x509_signing_key
+          elsif options.client_x509_signing_key
                                        parse_x509_key(options.client_x509_signing_key)
-                                     end
+          end
         end
 
         def parse_x509_key(key)
