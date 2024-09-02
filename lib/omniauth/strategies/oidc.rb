@@ -97,7 +97,7 @@ module OmniAuth
 
       extra do
         { 
-          claims: decoded_access_token,
+          claims: decoded_id_token,
           scope: scope,
           raw_info: user_info.raw_attributes 
         }
