@@ -210,14 +210,6 @@ module OmniAuth
         @logout_path_pattern ||= /\A#{Regexp.quote(request.base_url)}#{options.logout_path}/
       end
 
-      # Strips port and host from strings with OIDC endpoints
-      def resolve_endpoint_from_host(host, endpoint)
-        start_index = endpoint.index(host) + host.length
-        endpoint = endpoint[start_index..]
-        endpoint = "/#{endpoint}" unless endpoint.start_with?("/")
-        endpoint
-      end
-
       # Override for the CallbackError class
       class CallbackError < StandardError
         attr_accessor :error, :error_reason, :error_uri
