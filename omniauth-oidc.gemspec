@@ -3,21 +3,21 @@
 require_relative "lib/omniauth/oidc/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "omniauth_oidc"
+  spec.name = "omniauth-oidc"
   spec.version = OmniauthOidc::VERSION
-  spec.authors = ["Suleyman Musayev"]
-  spec.email = ["slmusayev@gmail.com"]
+  spec.authors = []
+  spec.email = []
 
   spec.summary = "Omniauth strategy to authenticate and retrieve user data using OpenID Connect (OIDC)"
   spec.description = "Omniauth strategy to authenticate and retrieve user data as a client using OpenID Connect (OIDC)
     suited for multiple OIDC providers."
-  spec.homepage = "https://github.com/msuliq/omniauth_oidc"
+  spec.homepage = "https://github.com/CanalWestStudio/omniauth-oidc"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 2.7.0"
 
   spec.metadata["homepage_uri"] = spec.homepage
-  spec.metadata["source_code_uri"] = "https://github.com/msuliq/omniauth_oidc"
-  spec.metadata["changelog_uri"] = "https://github.com/msuliq/omniauth_oidc/blob/main/CHANGELOG.md"
+  spec.metadata["source_code_uri"] = "https://github.com/msuliq/omniauth-oidc"
+  spec.metadata["changelog_uri"] = "https://github.com/CanalWestStudio/omniauth-oidc/blob/main/CHANGELOG.md"
 
   # Specify which files should be added to the gem when it is released.
   # The `git ls-files -z` loads the files in the RubyGem that have been added into git.

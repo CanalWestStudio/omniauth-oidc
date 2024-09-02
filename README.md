@@ -10,11 +10,11 @@ Developed with reference to [omniauth-openid-connect](https://github.com/jjbohn/
 
 To install the gem run the following command in the terminal:
 
-    $ bundle add omniauth_oidc
+    $ bundle add omniauth-oidc
 
 If bundler is not being used to manage dependencies, install the gem by executing:
 
-    $ gem install omniauth_oidc
+    $ gem install omniauth-oidc
 
 
 ## Usage
@@ -22,7 +22,7 @@ If bundler is not being used to manage dependencies, install the gem by executin
 To use the OmniAuth OIDC strategy, you need to configure your Rails application and set up the necessary environment variables for OIDC client credentials.
 
 ### Configuration
-You have to provide Client ID, Client Secret and url for the OIDC configuration endpoint as a bare minimum for the `omniauth_oidc` to work properly.
+You have to provide Client ID, Client Secret and url for the OIDC configuration endpoint as a bare minimum for the `omniauth-oidc` to work properly.
 Create an initializer file at `config/initializers/omniauth.rb`
 
 ```ruby
@@ -291,7 +291,7 @@ Below are options for the `client_options` hash of the configuration:
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/msuliq/omniauth_oidc. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [code of conduct](https://github.com/msuliq/omniauth_oidc/blob/main/CODE_OF_CONDUCT.md).
+Bug reports and pull requests are welcome on GitHub at https://github.com/msuliq/omniauth-oidc. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [code of conduct](https://github.com/msuliq/omniauth-oidc/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 
@@ -299,4 +299,4 @@ The gem is available as open source under the terms of the [MIT License](https:/
 
 ## Code of Conduct
 
-Everyone interacting in the OmniauthOidc project's codebases, issue trackers, chat rooms and mailing lists is expected to follow the [code of conduct](https://github.com/msuliq/omniauth_oidc/blob/main/CODE_OF_CONDUCT.md).
+Everyone interacting in the OmniauthOidc project's codebases, issue trackers, chat rooms and mailing lists is expected to follow the [code of conduct](https://github.com/msuliq/omniauth-oidc/blob/main/CODE_OF_CONDUCT.md).
