@@ -58,7 +58,7 @@ module OmniAuth
                     else
                       options.state.call
                     end
-                  end
+          end
           session["omniauth.state"] = state || SecureRandom.hex(16)
         end
 
