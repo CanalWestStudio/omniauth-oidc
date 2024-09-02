@@ -29,6 +29,8 @@ module OmniAuth
 
         private
 
+        attr_reader :decoded_id_token
+
         def fetch_key
           parse_jwk_key(jwks_key)
         end
@@ -45,7 +47,6 @@ module OmniAuth
 
         def verify_id_token!(id_token)
           return unless id_token
-
           decode_id_token(id_token).verify!(issuer: config.issuer,
                                             client_id: client_options.identifier,
                                             nonce: params["nonce"].presence || stored_nonce)
@@ -66,7 +67,7 @@ module OmniAuth
             end
 
           decoded.verify!(keyset)
-          ::OpenIDConnect::ResponseObject::IdToken.new(decoded)
+          @decoded_id_token = ::OpenIDConnect::ResponseObject::IdToken.new(decoded)
         rescue JSON::JWK::Set::KidNotFound
           # Workaround for https://github.com/nov/json-jwt/pull/92#issuecomment-824654949
           raise if decoded&.header&.key?("kid")
@@ -75,7 +76,7 @@ module OmniAuth
 
           raise unless decoded
 
-          decoded
+          @decoded_id_token = decoded
         end
 
         # Check for jwt to match defined client_signing_alg
@@ -137,15 +138,15 @@ module OmniAuth
           UrlSafeBase64.decode64(str).unpack1("B*").to_i(2).to_s
         end
 
-        def decoded_id_token
-          decode_id_token(access_token.id_token).raw_attributes
+        def id_token_raw_attributes
+          decoded_id_token.raw_attributes
         end
 
         def user_info
           return @user_info if @user_info
 
-          if access_token.id_token
-            merged_user_info = access_token.userinfo!.raw_attributes.merge(decoded_id_token)
+          if id_token_raw_attributes
+            merged_user_info = access_token.userinfo!.raw_attributes.merge(id_token_raw_attributes)
 
             @user_info = ::OpenIDConnect::ResponseObject::UserInfo.new(
               # transform keys to ensure valid UserInfo object
