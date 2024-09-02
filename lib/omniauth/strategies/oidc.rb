@@ -190,7 +190,7 @@ module OmniAuth
       end
 
       def redirect_uri
-        "#{request.base_url}/auth/#{name}/callback"
+        options.redirect_uri || full_host + callback_path
       end
 
       def encoded_post_logout_redirect_uri
