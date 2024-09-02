@@ -6,16 +6,7 @@ module OmniAuth
       # Callback phase
       module Callback
         def callback_phase # rubocop:disable Metrics
-          error = params["error_reason"] || params["error"]
-          error_description = params["error_description"] || params["error_reason"]
-          invalid_state = (options.require_state && params["state"].to_s.empty?) || params["state"] != stored_state
-
-          raise CallbackError, error: params["error"], reason: error_description, uri: params["error_uri"] if error
-          raise CallbackError, error: :csrf_detected, reason: "Invalid 'state' parameter" if invalid_state
-
-          return unless valid_response_type?
-
-          options.issuer = issuer if options.issuer.nil? || options.issuer.empty?
+          error_handler
 
           verify_id_token!(params["id_token"]) if configured_response_type == "id_token"
 
@@ -58,13 +49,13 @@ module OmniAuth
 
           verify_id_token!(@access_token.id_token) if configured_response_type == "code"
 
-          options.fetch_user_info ? user_info_from_access_token : define_access_token
+          options.fetch_user_info ? get_user_info_from_access_token : define_access_token
         end
 
         def id_token_callback_phase
           user_data = decode_id_token(params["id_token"]).raw_attributes
 
-          define_user_info(user_data)
+          define_user_info
         end
 
         def valid_response_type?
@@ -76,25 +67,26 @@ module OmniAuth
           false
         end
 
-        def user_info_from_access_token
-          user_data = HTTParty.get(
-            config.userinfo_endpoint, {
-              headers: {
-                "Authorization" => "Bearer #{@access_token}",
-                "Content-Type" => "application/json"
-              }
-            }
-          )
+        def get_user_info_from_access_token
+          headers = {
+            Authorization: "Bearer #{@access_token}"
+          }
 
-          define_user_info(user_data.parsed_response)
+          Transport.request('GET', config.userinfo_endpoint, headers=headers)
+
+          define_user_info
         end
 
-        def define_user_info(user_data)
+        def define_user_info
           env["omniauth.auth"] = AuthHash.new(
             provider: name,
-            uid: user_data["sub"],
-            info: { name: user_data["name"], email: user_data["email"] },
-            extra: { raw_info: user_data },
+            uid: user_info.sub,
+            info: { 
+              name: user_info.name, 
+              email: user_info.email, 
+              email_verified: user_info.email_verified 
+            },
+            extra: { raw_info: user_info },
             credentials: {
               id_token: @access_token.id_token,
               token: @access_token.access_token,
@@ -131,6 +123,19 @@ module OmniAuth
           client.authorization_endpoint = config.authorization_endpoint
           client.token_endpoint = config.token_endpoint
           client.userinfo_endpoint = config.userinfo_endpoint
+        end
+
+        def error_handler
+          error = params["error_reason"] || params["error"]
+          error_description = params["error_description"] || params["error_reason"]
+          invalid_state = (options.require_state && params["state"].to_s.empty?) || params["state"] != stored_state
+
+          raise CallbackError, error: params["error"], reason: error_description, uri: params["error_uri"] if error
+          raise CallbackError, error: :csrf_detected, reason: "Invalid 'state' parameter" if invalid_state
+
+          return unless valid_response_type?
+
+          options.issuer = issuer if options.issuer.nil? || options.issuer.empty?
         end
       end
     end
