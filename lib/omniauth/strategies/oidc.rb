@@ -30,7 +30,7 @@ module OmniAuth
 
       def_delegator :request, :params
 
-      option :name, "oidc"                                  # to separate each oidc provider available in the app
+      option :name, :oidc                                   # to separate each oidc provider available in the app
       option(:client_options, identifier: nil,              # client id, required
                               secret: nil,                  # client secret, required
                               host: nil,                    # oidc provider host, optional
@@ -88,18 +88,19 @@ module OmniAuth
           name: user_info.name,
           email: user_info.email,
           email_verified: user_info.email_verified,
-          nickname: user_info.preferred_username,
           first_name: user_info.given_name,
           last_name: user_info.family_name,
-          gender: user_info.gender,
-          image: user_info.picture,
           phone: user_info.phone_number,
-          urls: { website: user_info.website }
+          address: user_info.address
         }
       end
 
       extra do
-        { raw_info: user_info.raw_attributes }
+        { 
+          claims: decoded_access_token,
+          scope: scope,
+          raw_info: user_info.raw_attributes 
+        }
       end
 
       credentials do
