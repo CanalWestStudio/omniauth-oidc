@@ -16,15 +16,14 @@ module OmniAuth
             token: @access_token.access_token,
             refresh_token: @access_token.refresh_token,
             expires_in: @access_token.expires_in,
-            scope: scope
+            scope: @access_token.scope
           }
         end
 
         def serialized_extra
           {
-            claims: decoded_id_token,
-            scope: scope,
-            raw_info: user_info.raw_attributes
+            claims: id_token_raw_attributes,
+            scope: scope
           }
         end
 
