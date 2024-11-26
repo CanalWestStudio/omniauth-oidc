@@ -79,12 +79,10 @@ module OmniAuth
 
         def define_user_info
           env["omniauth.auth"] = AuthHash.new(serialized_user_info_auth_hash)
-          call_app!
         end
 
         def define_access_token
           env["omniauth.auth"] = AuthHash.new(serialized_access_token_auth_hash)
-          call_app!
         end
 
         def configured_response_type
