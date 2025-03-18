@@ -23,6 +23,9 @@ module OmniAuth
             opts[key] = request.params[key.to_s] unless opts.key?(key)
           end
 
+          # Add environment to the request if it is set
+          opts[:environment] = client_options.environment if client_options.environment
+
           if options.pkce
             verifier = options.pkce_verifier ? options.pkce_verifier.call : SecureRandom.hex(64)
 
