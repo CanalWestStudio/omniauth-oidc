@@ -42,7 +42,8 @@ module OmniAuth
                               token_endpoint: nil,          # optional
                               userinfo_endpoint: nil,       # optional
                               jwks_uri: nil,                # optional
-                              end_session_endpoint: nil)    # optional
+                              end_session_endpoint: nil,    # optional
+                              environment: nil)             # optional
 
       option :issuer
       option :client_signing_alg
