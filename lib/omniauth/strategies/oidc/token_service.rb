@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require_relative 'http_client'
 require 'uri'
 require 'base64'
@@ -12,26 +14,35 @@ module OmniAuth
 
         class << self
           # Exchange authorization code for tokens with optimized performance
-          def exchange_code_for_tokens(token_endpoint, token_params, headers = {})
+          # Maintains backward compatibility with original callback signature
+          def exchange_code_for_tokens(config, client_options, authorization_code, redirect_uri, extra_params = {})
             start_time = current_time_ms
 
             begin
+              token_endpoint = config.token_endpoint
+              raise "Token endpoint not available" unless token_endpoint
+
               log_info("[TOKEN] Exchanging authorization code at #{URI.parse(token_endpoint).host}")
+
+              # Build token request parameters
+              token_params = build_token_params(
+                client_options,
+                authorization_code,
+                redirect_uri,
+                extra_params
+              )
+
+              # Build headers for token exchange
+              headers = build_token_headers(client_options)
 
               # Prepare form data for token exchange
               form_data = URI.encode_www_form(token_params)
-
-              # Set appropriate headers for token exchange
-              token_headers = {
-                "Content-Type" => "application/x-www-form-urlencoded",
-                "Accept" => "application/json"
-              }.merge(headers)
 
               # Use the modernized HTTP client
               response = HttpClient.post(
                 token_endpoint,
                 body: form_data,
-                headers: token_headers,
+                headers: headers,
                 timeout: Configuration.token_timeout
               )
 
@@ -56,7 +67,7 @@ module OmniAuth
             rescue => e
               execution_time = current_time_ms - start_time
               log_error("[TOKEN] ❌ Token exchange failed after #{execution_time}ms: #{e.message}")
-              return nil
+              raise
             end
           end
 
@@ -104,6 +115,47 @@ module OmniAuth
           end
 
           private
+
+          def build_token_params(client_options, authorization_code, redirect_uri, extra_params)
+            params = {
+              grant_type: 'authorization_code',
+              code: authorization_code,
+              redirect_uri: redirect_uri,
+              client_id: client_options.identifier
+            }
+
+            # Add client secret if using client_secret_post
+            if client_options.secret && extra_params[:client_auth_method] != :client_secret_basic
+              params[:client_secret] = client_options.secret
+            end
+
+            # Add PKCE verifier if present
+            if extra_params[:code_verifier]
+              params[:code_verifier] = extra_params[:code_verifier]
+            end
+
+            # Add scope if required
+            if extra_params[:scope]
+              params[:scope] = Array(extra_params[:scope]).join(' ')
+            end
+
+            params
+          end
+
+          def build_token_headers(client_options)
+            headers = {
+              'Content-Type' => 'application/x-www-form-urlencoded',
+              'Accept' => 'application/json'
+            }
+
+            # Add basic auth header if using client_secret_basic (default)
+            if client_options.secret
+              auth_string = Base64.strict_encode64("#{client_options.identifier}:#{client_options.secret}")
+              headers['Authorization'] = "Basic #{auth_string}"
+            end
+
+            headers
+          end
 
           def parse_json_response(body)
             JSON.parse(body)
@@ -185,6 +237,11 @@ module OmniAuth
           end
 
           def to_h
+            @raw_data
+          end
+
+          # For backward compatibility with existing callback expectations
+          def raw_attributes
             @raw_data
           end
         end

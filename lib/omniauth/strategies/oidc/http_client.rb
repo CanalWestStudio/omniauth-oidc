@@ -28,8 +28,12 @@ module OmniAuth
             start_time = current_time_ms
 
             begin
-              # Use HTTPX directly without complex configuration
-              response = HTTPX.get(url)
+              # Use HTTPX directly with optional headers
+              if options[:headers] && options[:headers].any?
+                response = HTTPX.get(url, headers: options[:headers])
+              else
+                response = HTTPX.get(url)
+              end
 
               execution_time = current_time_ms - start_time
               log_performance_metrics(url, execution_time, response)
@@ -58,7 +62,7 @@ module OmniAuth
               elsif body
                 response = HTTPX.post(url, body: body)
               else
-                response = HTTPX.post(url)
+                response = HTTPX.post(url, headers: headers)
               end
 
               execution_time = current_time_ms - start_time
