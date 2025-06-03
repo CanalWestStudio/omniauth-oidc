@@ -14,6 +14,7 @@ group :development, :test do
   gem "bundle-audit"
   gem "minitest"
   gem "rake"
+  gem "rackup"
   gem "rubocop"
   gem "rubocop-rails-omakase", require: false, group: [ :development ]
   gem "webmock"

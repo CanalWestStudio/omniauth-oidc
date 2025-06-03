@@ -5,7 +5,7 @@ require "ostruct"
 module OmniAuth
   module Strategies
     class Oidc
-      # Optimized OIDC discovery service with caching and performance monitoring
+      # OIDC discovery service with caching and performance monitoring
       class DiscoveryService
         CACHE_TTL = 300 # 5 minutes - OIDC configs rarely change
         FALLBACK_TIMEOUT = 2 # seconds
@@ -29,19 +29,12 @@ module OmniAuth
 
               execution_time = current_time_ms - start_time
 
-              if response.is_a?(HTTPX::Response) && response.status >= 200 && response.status < 300
-                config_data = parse_json_response(response.body)
-
-                if config_data && validate_configuration(config_data)
-                  log_info("[DISCOVERY] ✅ Configuration fetched in #{execution_time}ms")
-                  return create_config_object(config_data)
-                else
-                  log_error("[DISCOVERY] ❌ Invalid configuration data")
-                  return nil
-                end
+              # HttpClient now returns parsed Hash responses
+              if response.is_a?(Hash) && validate_configuration(response)
+                log_info("[DISCOVERY] ✅ Configuration fetched in #{execution_time}ms")
+                return create_config_object(response)
               else
-                status = response.is_a?(HTTPX::Response) ? response.status : "ERROR"
-                log_error("[DISCOVERY] ❌ HTTP #{status}: Failed to fetch configuration")
+                log_error("[DISCOVERY] ❌ Invalid configuration data")
                 return nil
               end
 
@@ -55,14 +48,11 @@ module OmniAuth
           def fetch_jwks(jwks_uri)
             return nil unless jwks_uri
 
-            cache_key = "oidc_jwks:#{jwks_uri}"
-
             log_timing("JWKS fetch") do
-              HttpClient.get(
-                jwks_uri,
-                cache_key: cache_key,
-                context: :jwks
-              )
+              HttpClient.get(jwks_uri, {
+                timeout: Configuration.discovery_timeout,
+                cache_ttl: Configuration.cache_ttl
+              })
             end
           rescue => e
             log_error("Failed to fetch JWKS from #{jwks_uri}: #{e.message}")
@@ -71,16 +61,10 @@ module OmniAuth
 
           private
 
-          def parse_json_response(body)
-            JSON.parse(body)
-          rescue JSON::ParserError => e
-            log_error("[DISCOVERY] JSON parse error: #{e.message}")
-            nil
-          end
-
           def validate_configuration(config_data)
-            required_fields = %w[issuer authorization_endpoint token_endpoint]
+            return false unless config_data.is_a?(Hash)
 
+            required_fields = %w[issuer authorization_endpoint token_endpoint]
             missing_fields = required_fields.select { |field| config_data[field].nil? || config_data[field].empty? }
 
             if missing_fields.any?
