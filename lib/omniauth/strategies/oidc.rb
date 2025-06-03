@@ -2,19 +2,17 @@
 
 require "base64"
 require "timeout"
-require "net/http"
-require "open-uri"
 require "omniauth"
 require "openid_connect"
 require "openid_config_parser"
 require "forwardable"
-require "httparty"
+require_relative "../oidc/errors"
 
 Dir[File.join(File.dirname(__FILE__), "oidc", "*.rb")].sort.each { |file| require_relative file }
 
 module OmniAuth
   module Strategies
-    # OIDC strategy for omniauth - Optimized for performance
+    # OIDC strategy for omniauth - Optimized for performance with modern HTTP client
     class Oidc
       include OmniAuth::Strategy
       include Callback

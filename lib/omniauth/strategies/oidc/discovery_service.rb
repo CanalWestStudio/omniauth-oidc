@@ -1,36 +1,55 @@
-require_relative 'http_client'
+# frozen_string_literal: true
+
+require "ostruct"
 
 module OmniAuth
   module Strategies
     class Oidc
-      # Optimized discovery document service with caching and performance monitoring
+      # Optimized OIDC discovery service with caching and performance monitoring
       class DiscoveryService
         CACHE_TTL = 300 # 5 minutes - OIDC configs rarely change
         FALLBACK_TIMEOUT = 2 # seconds
 
         class << self
-          def fetch_configuration(endpoint_url)
-            return nil unless endpoint_url
+          # Fetch OIDC configuration with caching and performance optimization
+          def fetch_configuration(config_endpoint)
+            start_time = current_time_ms
 
-            cache_key = "oidc_discovery:#{endpoint_url}"
+            begin
+              log_info("[DISCOVERY] Fetching OIDC configuration from #{config_endpoint}")
 
-            log_timing("Discovery document fetch") do
-              config_data = HttpClient.get(
-                endpoint_url,
-                timeout: FALLBACK_TIMEOUT,
-                cache_key: cache_key
-              )
+              # Use the modernized HTTP client with caching
+              response = HttpClient.get(config_endpoint, {
+                timeout: Configuration.discovery_timeout,
+                cache_ttl: Configuration.cache_ttl,
+                headers: {
+                  "Accept" => "application/json"
+                }
+              })
 
-              if config_data.is_a?(Hash)
-                OpenStruct.new(config_data)
+              execution_time = current_time_ms - start_time
+
+              if response.is_a?(HTTPX::Response) && response.status >= 200 && response.status < 300
+                config_data = parse_json_response(response.body)
+
+                if config_data && validate_configuration(config_data)
+                  log_info("[DISCOVERY] ✅ Configuration fetched in #{execution_time}ms")
+                  return create_config_object(config_data)
+                else
+                  log_error("[DISCOVERY] ❌ Invalid configuration data")
+                  return nil
+                end
               else
-                log_error("Invalid discovery document format from #{endpoint_url}")
-                nil
+                status = response.is_a?(HTTPX::Response) ? response.status : "ERROR"
+                log_error("[DISCOVERY] ❌ HTTP #{status}: Failed to fetch configuration")
+                return nil
               end
+
+            rescue => e
+              execution_time = current_time_ms - start_time
+              log_error("[DISCOVERY] ❌ Failed after #{execution_time}ms: #{e.message}")
+              return nil
             end
-          rescue => e
-            log_error("Failed to fetch discovery document from #{endpoint_url}: #{e.message}")
-            nil
           end
 
           def fetch_jwks(jwks_uri)
@@ -41,8 +60,8 @@ module OmniAuth
             log_timing("JWKS fetch") do
               HttpClient.get(
                 jwks_uri,
-                timeout: FALLBACK_TIMEOUT,
-                cache_key: cache_key
+                cache_key: cache_key,
+                context: :jwks
               )
             end
           rescue => e
@@ -51,6 +70,35 @@ module OmniAuth
           end
 
           private
+
+          def parse_json_response(body)
+            JSON.parse(body)
+          rescue JSON::ParserError => e
+            log_error("[DISCOVERY] JSON parse error: #{e.message}")
+            nil
+          end
+
+          def validate_configuration(config_data)
+            required_fields = %w[issuer authorization_endpoint token_endpoint]
+
+            missing_fields = required_fields.select { |field| config_data[field].nil? || config_data[field].empty? }
+
+            if missing_fields.any?
+              log_error("[DISCOVERY] Missing required fields: #{missing_fields.join(', ')}")
+              return false
+            end
+
+            true
+          end
+
+          def create_config_object(config_data)
+            # Create an OpenStruct-like object that mimics the expected interface
+            OpenStruct.new(config_data)
+          end
+
+          def current_time_ms
+            (Time.now.to_f * 1000).to_i
+          end
 
           def log_timing(description, &block)
             start_time = Time.now

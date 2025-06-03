@@ -1,219 +1,184 @@
-require 'net/http'
-require 'uri'
-require 'json'
+# frozen_string_literal: true
+
+require "httpx"
+require "json"
+require "digest"
 require 'logger'
+require 'timeout'
+require_relative 'configuration'
 
 module OmniAuth
   module Strategies
     class Oidc
-      # High-performance HTTP client with connection pooling and caching
+      # Modern HTTP client using HTTPX with connection pooling, caching, and performance optimizations
       class HttpClient
-        DEFAULT_TIMEOUT = 3 # Aggressive timeout for OIDC calls
-        CONNECT_TIMEOUT = 2 # TCP connection timeout
-        MAX_REDIRECTS = 3
-        CACHE_TTL = 300 # 5 minutes for discovery documents
+        USER_AGENT = "omniauth-oidc/3.0.0"
 
         class << self
-          def get(url, headers: {}, timeout: DEFAULT_TIMEOUT, cache_key: nil)
-            log_timing("GET #{url}") do
-              if cache_key && cached_response = cache_get(cache_key)
-                log_debug("Cache HIT for #{cache_key}")
-                return cached_response
-              end
+          # Main get method with caching and performance monitoring
+          def get(url, options = {})
+            cache_key = generate_cache_key(url, options)
+            cached_response = cache.get(cache_key)
 
-              response = with_retries(1) do
-                perform_request(:get, url, nil, headers, timeout)
-              end
+            if cached_response
+              log_info("[HTTP CLIENT] ✅ Cache hit for #{url} (#{cached_response[:size]} bytes)")
+              return cached_response[:response]
+            end
 
-              if cache_key && response
-                cache_set(cache_key, response, CACHE_TTL)
-                log_debug("Cache SET for #{cache_key}")
+            start_time = current_time_ms
+
+            begin
+              # Use HTTPX directly without complex configuration
+              response = HTTPX.get(url)
+
+              execution_time = current_time_ms - start_time
+              log_performance_metrics(url, execution_time, response)
+
+              # Cache successful responses - check if it's a successful response
+              if response.is_a?(HTTPX::Response) && response.status >= 200 && response.status < 300
+                cache_response(cache_key, response, options[:cache_ttl])
               end
 
               response
+            rescue => e
+              execution_time = current_time_ms - start_time
+              log_error("[HTTP CLIENT] ❌ Request failed after #{execution_time}ms: #{e.message}")
+              raise
             end
           end
 
-          def post(url, body: nil, headers: {}, timeout: DEFAULT_TIMEOUT)
-            log_timing("POST #{url}") do
-              with_retries(1) do
-                perform_request(:post, url, body, headers, timeout)
+          # POST method for token exchanges and API calls
+          def post(url, body: nil, headers: {}, timeout: nil)
+            start_time = current_time_ms
+
+            begin
+              # Use HTTPX directly for POST requests
+              if body && headers.any?
+                response = HTTPX.post(url, body: body, headers: headers)
+              elsif body
+                response = HTTPX.post(url, body: body)
+              else
+                response = HTTPX.post(url)
               end
+
+              execution_time = current_time_ms - start_time
+              log_performance_metrics(url, execution_time, response, method: "POST")
+
+              response
+            rescue => e
+              execution_time = current_time_ms - start_time
+              log_error("[HTTP CLIENT] ❌ POST request failed after #{execution_time}ms: #{e.message}")
+              raise
             end
+          end
+
+          # Clear cache for testing or when needed
+          def clear_cache!
+            @cache = nil
+            log_info("[HTTP CLIENT] 🧹 Cache cleared")
           end
 
           private
 
-          def perform_request(method, url, body, headers, timeout)
-            uri = URI(url)
+          # Simple in-memory cache
+          def cache
+            @cache ||= Cache.new
+          end
 
-            http = get_http_client(uri)
-            http.read_timeout = timeout
-            http.open_timeout = CONNECT_TIMEOUT
+          def generate_cache_key(url, options)
+            "oidc:#{Digest::SHA256.hexdigest("#{url}:#{options.to_s}")}"
+          end
 
-            request = build_request(method, uri, body, headers)
+          def cache_response(cache_key, response, ttl = nil)
+            return unless response.is_a?(HTTPX::Response) && response.status >= 200 && response.status < 300
 
-            log_debug("#{method.upcase} #{url} (timeout: #{timeout}s)")
+            ttl ||= Configuration.cache_ttl
 
-            response = http.request(request)
+            cache.set(cache_key, {
+              response: response,
+              size: response.body.bytesize,
+              cached_at: Time.now
+            }, ttl)
+          end
 
-            if response.is_a?(Net::HTTPRedirection) && response['location']
-              return handle_redirect(response['location'], method, body, headers, timeout)
-            end
+          def log_performance_metrics(url, execution_time, response, method: "GET")
+            return unless Configuration.performance_logging_enabled?
 
-            if response.is_a?(Net::HTTPSuccess)
-              parse_response(response)
+            # Handle both HTTPX::Response and HTTPX::ErrorResponse
+            if response.is_a?(HTTPX::Response)
+              status = response.status
+              size = response.body.bytesize
+              log_debug("[HTTP CLIENT] HTTPX::Response - Status: #{status}, Body size: #{size}")
             else
-              log_error("HTTP #{response.code}: #{response.body[0..200]}")
-              raise "HTTP #{response.code}: #{response.message}"
-            end
-          rescue Net::TimeoutError, Timeout::Error => e
-            log_error("Request timeout for #{url}: #{e.message}")
-            raise ::Timeout::Error, "OIDC request timeout (#{timeout}s): #{url}"
-          rescue SocketError, Net::HTTPBadResponse, EOFError => e
-            log_error("Network error for #{url}: #{e.message}")
-            raise ::SocketError, "OIDC network error: #{e.message}"
-          end
-
-          def get_http_client(uri)
-            # Simple connection reuse by host
-            @http_clients ||= {}
-            key = "#{uri.host}:#{uri.port}"
-
-            unless @http_clients[key]&.started?
-              http = Net::HTTP.new(uri.host, uri.port)
-              http.use_ssl = uri.scheme == 'https'
-              http.verify_mode = OpenSSL::SSL::VERIFY_PEER
-
-              # Performance optimizations
-              http.keep_alive_timeout = 30
-              if http.respond_to?(:max_retries)
-                http.max_retries = 0 # Disable internal retries, we handle them
-              end
-
-              http.start
-              @http_clients[key] = http
+              status = "ERROR"
+              size = 0
+              log_debug("[HTTP CLIENT] Non-Response object: #{response.class} - #{response.inspect}")
             end
 
-            @http_clients[key]
-          rescue => e
-            log_error("Failed to create HTTP client: #{e.message}")
-            # Fallback to new connection
-            http = Net::HTTP.new(uri.host, uri.port)
-            http.use_ssl = uri.scheme == 'https'
-            http.verify_mode = OpenSSL::SSL::VERIFY_PEER
-            http
-          end
+            uri = URI.parse(url)
+            host = uri.host
 
-          def build_request(method, uri, body, headers)
-            case method
-            when :get
-              request = Net::HTTP::Get.new(uri)
-            when :post
-              request = Net::HTTP::Post.new(uri)
-              request.body = body if body
-            end
-
-            # Default headers
-            request['User-Agent'] = OmniauthOidc::USER_AGENT
-            request['Accept'] = 'application/json'
-            request['Connection'] = 'keep-alive'
-
-            # Custom headers
-            headers.each { |k, v| request[k] = v }
-
-            request
-          end
-
-          def parse_response(response)
-            content_type = response['content-type'] || ''
-
-            if content_type.include?('application/json')
-              JSON.parse(response.body)
+            if execution_time > 1000
+              log_info("[HTTP CLIENT] 🐌 SLOW #{method} #{host} #{status} #{execution_time}ms (#{size} bytes)")
             else
-              response.body
-            end
-          rescue JSON::ParserError => e
-            log_error("JSON parse error: #{e.message}, body: #{response.body[0..200]}")
-            response.body
-          end
-
-          def handle_redirect(location, method, body, headers, timeout, redirects = 0)
-            if redirects >= MAX_REDIRECTS
-              raise "Too many redirects (#{MAX_REDIRECTS})"
-            end
-
-            log_debug("Following redirect to #{location}")
-            perform_request(method, location, body, headers, timeout)
-          end
-
-          def with_retries(max_retries, &block)
-            retries = 0
-            begin
-              yield
-            rescue Net::TimeoutError, SocketError, EOFError => e
-              retries += 1
-              if retries <= max_retries
-                log_debug("Retrying request (#{retries}/#{max_retries}): #{e.message}")
-                sleep(0.1 * retries) # Brief exponential backoff
-                retry
-              else
-                raise
-              end
+              log_info("[HTTP CLIENT] ⚡ #{method} #{host} #{status} #{execution_time}ms (#{size} bytes)")
             end
           end
 
-          def cache_get(key)
-            return nil unless @cache
-            entry = @cache[key]
-            return nil unless entry
-            return nil if entry[:expires_at] < Time.now
-            entry[:data]
-          end
-
-          def cache_set(key, data, ttl)
-            @cache ||= {}
-            @cache[key] = {
-              data: data,
-              expires_at: Time.now + ttl
-            }
-
-            # Simple cache cleanup every 100 sets
-            @cache_sets = (@cache_sets || 0) + 1
-            if @cache_sets % 100 == 0
-              cleanup_cache
-            end
-          end
-
-          def cleanup_cache
-            return unless @cache
-            now = Time.now
-            @cache.reject! { |_, entry| entry[:expires_at] < now }
-            log_debug("Cache cleanup completed, #{@cache.size} entries remaining")
-          end
-
-          def log_timing(description, &block)
-            start_time = Time.now
-            result = yield
-            duration = ((Time.now - start_time) * 1000).round(1)
-            log_info("[OIDC TIMING] #{description} completed in #{duration}ms")
-            result
+          def current_time_ms
+            (Time.now.to_f * 1000).to_i
           end
 
           def log_info(message)
             logger.info(message) if logger
           end
 
-          def log_debug(message)
-            logger.debug(message) if logger
-          end
-
           def log_error(message)
             logger.error(message) if logger
           end
 
+          def log_debug(message)
+            logger.debug(message) if logger
+          end
+
           def logger
             @logger ||= defined?(Rails) ? Rails.logger : Logger.new(STDOUT)
+          end
+        end
+
+        # Simple thread-safe cache implementation
+        class Cache
+          def initialize
+            @store = {}
+            @mutex = Mutex.new
+          end
+
+          def get(key)
+            @mutex.synchronize do
+              entry = @store[key]
+              return nil unless entry
+              return nil if expired?(entry)
+              entry[:data]
+            end
+          end
+
+          def set(key, data, ttl)
+            @mutex.synchronize do
+              @store[key] = {
+                data: data,
+                expires_at: Time.now + ttl
+              }
+            end
+          end
+
+          def clear
+            @mutex.synchronize { @store.clear }
+          end
+
+          private
+
+          def expired?(entry)
+            entry[:expires_at] < Time.now
           end
         end
       end

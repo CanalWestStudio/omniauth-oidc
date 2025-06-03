@@ -1,133 +1,132 @@
 require_relative 'http_client'
 require 'uri'
 require 'base64'
+require 'json'
 
 module OmniAuth
   module Strategies
     class Oidc
-      # Optimized token exchange service
+      # Optimized token exchange service with performance monitoring
       class TokenService
         TOKEN_TIMEOUT = 5 # seconds - token exchanges can be slower than discovery
 
         class << self
-          def exchange_code_for_tokens(config, client_options, authorization_code, redirect_uri, extra_params = {})
-            log_timing("Token exchange") do
-              token_endpoint = config.token_endpoint
-              raise "Token endpoint not available" unless token_endpoint
+          # Exchange authorization code for tokens with optimized performance
+          def exchange_code_for_tokens(token_endpoint, token_params, headers = {})
+            start_time = current_time_ms
 
-              # Build token request
-              token_params = build_token_params(
-                client_options,
-                authorization_code,
-                redirect_uri,
-                extra_params
-              )
+            begin
+              log_info("[TOKEN] Exchanging authorization code at #{URI.parse(token_endpoint).host}")
 
-              # Prepare headers
-              headers = build_token_headers(client_options)
+              # Prepare form data for token exchange
+              form_data = URI.encode_www_form(token_params)
 
-              # Make token request
-              log_info("[OIDC TOKEN] Exchanging code for tokens at #{token_endpoint}")
+              # Set appropriate headers for token exchange
+              token_headers = {
+                "Content-Type" => "application/x-www-form-urlencoded",
+                "Accept" => "application/json"
+              }.merge(headers)
 
+              # Use the modernized HTTP client
               response = HttpClient.post(
                 token_endpoint,
-                body: URI.encode_www_form(token_params),
-                headers: headers,
-                timeout: TOKEN_TIMEOUT
+                body: form_data,
+                headers: token_headers,
+                timeout: Configuration.token_timeout
               )
 
-              if response.is_a?(Hash) && response['access_token']
-                log_info("[OIDC TOKEN] Token exchange successful")
-                TokenResponse.new(response)
+              execution_time = current_time_ms - start_time
+
+              if response.is_a?(HTTPX::Response) && response.status >= 200 && response.status < 300
+                token_data = parse_json_response(response.body)
+
+                if token_data && validate_token_response(token_data)
+                  log_info("[TOKEN] ✅ Token exchange completed in #{execution_time}ms")
+                  return TokenResponse.new(token_data)
+                else
+                  log_error("[TOKEN] ❌ Invalid token response")
+                  return nil
+                end
               else
-                log_error("Invalid token response: #{response}")
-                raise "Invalid token response from provider"
+                status = response.is_a?(HTTPX::Response) ? response.status : "ERROR"
+                log_error("[TOKEN] ❌ HTTP #{status}: Token exchange failed")
+                return nil
               end
+
+            rescue => e
+              execution_time = current_time_ms - start_time
+              log_error("[TOKEN] ❌ Token exchange failed after #{execution_time}ms: #{e.message}")
+              return nil
             end
-          rescue => e
-            log_error("Token exchange failed: #{e.message}")
-            raise
           end
 
+          # Fetch user info with optimized performance
           def fetch_user_info(userinfo_endpoint, access_token)
             return nil unless userinfo_endpoint && access_token
 
-            log_timing("UserInfo fetch") do
-              headers = {
-                'Authorization' => "Bearer #{access_token}",
-                'Accept' => 'application/json'
-              }
+            start_time = current_time_ms
 
-              log_info("[OIDC USERINFO] Fetching user info from #{userinfo_endpoint}")
+            begin
+              log_info("[USERINFO] Fetching user info from #{URI.parse(userinfo_endpoint).host}")
 
-              response = HttpClient.get(
-                userinfo_endpoint,
-                headers: headers,
-                timeout: TOKEN_TIMEOUT
-              )
+              # Use the modernized HTTP client with bearer token
+              response = HttpClient.get(userinfo_endpoint, {
+                timeout: Configuration.userinfo_timeout,
+                headers: {
+                  "Authorization" => "Bearer #{access_token}",
+                  "Accept" => "application/json"
+                }
+              })
 
-              if response.is_a?(Hash)
-                log_info("[OIDC USERINFO] User info fetch successful")
-                response
+              execution_time = current_time_ms - start_time
+
+              if response.is_a?(HTTPX::Response) && response.status >= 200 && response.status < 300
+                user_data = parse_json_response(response.body)
+
+                if user_data
+                  log_info("[USERINFO] ✅ User info fetched in #{execution_time}ms")
+                  return user_data
+                else
+                  log_error("[USERINFO] ❌ Invalid user info response")
+                  return nil
+                end
               else
-                log_error("Invalid userinfo response: #{response}")
-                nil
+                status = response.is_a?(HTTPX::Response) ? response.status : "ERROR"
+                log_error("[USERINFO] ❌ HTTP #{status}: User info fetch failed")
+                return nil
               end
+
+            rescue => e
+              execution_time = current_time_ms - start_time
+              log_error("[USERINFO] ❌ User info fetch failed after #{execution_time}ms: #{e.message}")
+              return nil
             end
-          rescue => e
-            log_error("UserInfo fetch failed: #{e.message}")
-            nil
           end
 
           private
 
-          def build_token_params(client_options, authorization_code, redirect_uri, extra_params)
-            params = {
-              grant_type: 'authorization_code',
-              code: authorization_code,
-              redirect_uri: redirect_uri,
-              client_id: client_options.identifier
-            }
-
-            # Add client secret if using client_secret_post
-            if client_options.secret && extra_params[:client_auth_method] != :client_secret_basic
-              params[:client_secret] = client_options.secret
-            end
-
-            # Add PKCE verifier if present
-            if extra_params[:code_verifier]
-              params[:code_verifier] = extra_params[:code_verifier]
-            end
-
-            # Add scope if required
-            if extra_params[:scope]
-              params[:scope] = Array(extra_params[:scope]).join(' ')
-            end
-
-            params
+          def parse_json_response(body)
+            JSON.parse(body)
+          rescue JSON::ParserError => e
+            log_error("[TOKEN] JSON parse error: #{e.message}")
+            nil
           end
 
-          def build_token_headers(client_options)
-            headers = {
-              'Content-Type' => 'application/x-www-form-urlencoded',
-              'Accept' => 'application/json'
-            }
+          def validate_token_response(token_data)
+            # Check for required token response fields
+            return false unless token_data.is_a?(Hash)
+            return false unless token_data['access_token']
 
-            # Add basic auth header if using client_secret_basic (default)
-            if client_options.secret
-              auth_string = Base64.strict_encode64("#{client_options.identifier}:#{client_options.secret}")
-              headers['Authorization'] = "Basic #{auth_string}"
+            # Warn about missing optional but common fields
+            unless token_data['token_type']
+              log_info("[TOKEN] Warning: token_type not present in response")
             end
 
-            headers
+            true
           end
 
-          def log_timing(description, &block)
-            start_time = Time.now
-            result = yield
-            duration = ((Time.now - start_time) * 1000).round(1)
-            log_info("[OIDC TOKEN TIMING] #{description} completed in #{duration}ms")
-            result
+          def current_time_ms
+            (Time.now.to_f * 1000).to_i
           end
 
           def log_info(message)
@@ -143,33 +142,50 @@ module OmniAuth
           end
         end
 
-        # Token response wrapper
+        # Token response wrapper with convenient accessors
         class TokenResponse
-          attr_reader :access_token, :id_token, :refresh_token, :token_type, :expires_in
+          attr_reader :raw_data
 
-          def initialize(response_hash)
-            @access_token = response_hash['access_token']
-            @id_token = response_hash['id_token']
-            @refresh_token = response_hash['refresh_token']
-            @token_type = response_hash['token_type'] || 'Bearer'
-            @expires_in = response_hash['expires_in']&.to_i
-            @raw_response = response_hash
+          def initialize(token_data)
+            @raw_data = token_data
           end
 
-          def raw_attributes
-            @raw_response
+          def access_token
+            @raw_data['access_token']
+          end
+
+          def id_token
+            @raw_data['id_token']
+          end
+
+          def refresh_token
+            @raw_data['refresh_token']
+          end
+
+          def token_type
+            @raw_data['token_type'] || 'Bearer'
+          end
+
+          def expires_in
+            @raw_data['expires_in']&.to_i
+          end
+
+          def scope
+            @raw_data['scope']
+          end
+
+          def expires_at
+            return nil unless expires_in
+            Time.now + expires_in
           end
 
           def expired?
-            return false unless @expires_in
-            # Add some buffer for clock skew
-            Time.now.to_i >= (@created_at.to_i + @expires_in - 30)
+            return false unless expires_at
+            Time.now >= expires_at
           end
 
-          private
-
-          def initialize_timestamps
-            @created_at = Time.now
+          def to_h
+            @raw_data
           end
         end
       end
