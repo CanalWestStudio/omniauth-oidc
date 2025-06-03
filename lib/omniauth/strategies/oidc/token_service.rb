@@ -8,13 +8,12 @@ require 'json'
 module OmniAuth
   module Strategies
     class Oidc
-      # Optimized token exchange service with performance monitoring
+      # Token exchange service with performance monitoring
       class TokenService
-        TOKEN_TIMEOUT = 5 # seconds - token exchanges can be slower than discovery
+        TOKEN_TIMEOUT = 5 # seconds
 
         class << self
-          # Exchange authorization code for tokens with optimized performance
-          # Maintains backward compatibility with original callback signature
+          # Exchange authorization code for access tokens
           def exchange_code_for_tokens(config, client_options, authorization_code, redirect_uri, extra_params = {})
             start_time = current_time_ms
 
@@ -32,10 +31,7 @@ module OmniAuth
                 extra_params
               )
 
-              # Build headers for token exchange
               headers = build_token_headers(client_options)
-
-              # Prepare form data for token exchange
               form_data = URI.encode_www_form(token_params)
 
               log_info("[TOKEN] Request details:")
@@ -45,7 +41,6 @@ module OmniAuth
               log_info("[TOKEN]   Authorization: #{headers['Authorization'] ? 'Basic [REDACTED]' : 'MISSING'}")
               log_info("[TOKEN]   Body length: #{form_data.length} bytes")
 
-              # Use the modernized HTTP client
               response = HttpClient.post(
                 token_endpoint,
                 body: form_data,
@@ -55,32 +50,27 @@ module OmniAuth
 
               execution_time = current_time_ms - start_time
 
-              if response.is_a?(HTTPX::Response) && response.status >= 200 && response.status < 300
-                token_data = parse_json_response(response.body)
-
-                if token_data && validate_token_response(token_data)
-                  log_info("[TOKEN] ✅ Token exchange completed in #{execution_time}ms")
-                  return TokenResponse.new(token_data)
-                else
-                  log_error("[TOKEN] ❌ Invalid token response")
-                  return nil
-                end
+              if response.is_a?(Hash) && response['access_token']
+                log_info("[TOKEN] ✅ Token exchange completed in #{execution_time}ms")
+                return TokenResponse.new(response)
               else
-                status = response.is_a?(HTTPX::Response) ? response.status : "ERROR"
-                error_body = response.is_a?(HTTPX::Response) ? response.body : "No response body"
-                log_error("[TOKEN] ❌ HTTP #{status}: Token exchange failed")
-                log_error("[TOKEN] ❌ Error response body: #{error_body}")
+                log_error("[TOKEN] ❌ Invalid token response: #{response}")
                 return nil
               end
 
             rescue => e
               execution_time = current_time_ms - start_time
               log_error("[TOKEN] ❌ Token exchange failed after #{execution_time}ms: #{e.message}")
-              raise
+
+              if e.message.include?("HTTP 401")
+                log_error("[TOKEN] ❌ Authentication failed - check client credentials")
+              end
+
+              return nil
             end
           end
 
-          # Fetch user info with optimized performance
+          # Fetch user info using access token
           def fetch_user_info(userinfo_endpoint, access_token)
             return nil unless userinfo_endpoint && access_token
 
@@ -89,7 +79,6 @@ module OmniAuth
             begin
               log_info("[USERINFO] Fetching user info from #{URI.parse(userinfo_endpoint).host}")
 
-              # Use the modernized HTTP client with bearer token
               response = HttpClient.get(userinfo_endpoint, {
                 timeout: Configuration.userinfo_timeout,
                 headers: {
@@ -100,19 +89,11 @@ module OmniAuth
 
               execution_time = current_time_ms - start_time
 
-              if response.is_a?(HTTPX::Response) && response.status >= 200 && response.status < 300
-                user_data = parse_json_response(response.body)
-
-                if user_data
-                  log_info("[USERINFO] ✅ User info fetched in #{execution_time}ms")
-                  return user_data
-                else
-                  log_error("[USERINFO] ❌ Invalid user info response")
-                  return nil
-                end
+              if response.is_a?(Hash)
+                log_info("[USERINFO] ✅ User info fetched in #{execution_time}ms")
+                return response
               else
-                status = response.is_a?(HTTPX::Response) ? response.status : "ERROR"
-                log_error("[USERINFO] ❌ HTTP #{status}: User info fetch failed")
+                log_error("[USERINFO] ❌ Invalid user info response: #{response}")
                 return nil
               end
 
@@ -133,8 +114,7 @@ module OmniAuth
               client_id: client_options.identifier
             }
 
-            # For Intuit, we typically use client_secret_basic (in Authorization header)
-            # Only add client_secret to body if explicitly using client_secret_post
+            # Add client secret to body if using client_secret_post method
             if client_options.secret && extra_params[:client_auth_method] == :client_secret_post
               params[:client_secret] = client_options.secret
               log_debug("[TOKEN] Using client_secret_post authentication method")
@@ -148,7 +128,7 @@ module OmniAuth
               log_debug("[TOKEN] Added PKCE code_verifier")
             end
 
-            # Add scope if required and send_scope_to_token_endpoint is true
+            # Add scope if required
             if extra_params[:scope] && extra_params[:send_scope_to_token_endpoint]
               params[:scope] = Array(extra_params[:scope]).join(' ')
               log_debug("[TOKEN] Added scope: #{params[:scope]}")
@@ -165,9 +145,8 @@ module OmniAuth
               'Accept' => 'application/json'
             }
 
-            # Add basic auth header if using client_secret_basic (default for Intuit)
+            # Add Basic Auth header for client authentication
             if client_options.secret && client_options.identifier
-              # Intuit expects: "Basic " + base64encode(client_id + ":" + client_secret)
               credentials = "#{client_options.identifier}:#{client_options.secret}"
               auth_string = Base64.strict_encode64(credentials)
               headers['Authorization'] = "Basic #{auth_string}"
@@ -179,26 +158,6 @@ module OmniAuth
             end
 
             headers
-          end
-
-          def parse_json_response(body)
-            JSON.parse(body)
-          rescue JSON::ParserError => e
-            log_error("[TOKEN] JSON parse error: #{e.message}")
-            nil
-          end
-
-          def validate_token_response(token_data)
-            # Check for required token response fields
-            return false unless token_data.is_a?(Hash)
-            return false unless token_data['access_token']
-
-            # Warn about missing optional but common fields
-            unless token_data['token_type']
-              log_info("[TOKEN] Warning: token_type not present in response")
-            end
-
-            true
           end
 
           def current_time_ms
@@ -268,7 +227,7 @@ module OmniAuth
             @raw_data
           end
 
-          # For backward compatibility with existing callback expectations
+          # For backward compatibility
           def raw_attributes
             @raw_data
           end

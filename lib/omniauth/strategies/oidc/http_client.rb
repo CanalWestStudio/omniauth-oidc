@@ -10,12 +10,12 @@ require_relative 'configuration'
 module OmniAuth
   module Strategies
     class Oidc
-      # Modern HTTP client using HTTPX with connection pooling, caching, and performance optimizations
+      # Modern HTTP client using HTTPX with connection pooling and caching
       class HttpClient
         USER_AGENT = "omniauth-oidc/3.0.0"
 
         class << self
-          # Main get method with caching and performance monitoring
+          # GET request with caching and performance monitoring
           def get(url, options = {})
             cache_key = generate_cache_key(url, options)
             cached_response = cache.get(cache_key)
@@ -28,7 +28,6 @@ module OmniAuth
             start_time = current_time_ms
 
             begin
-              # Use HTTPX directly with optional headers
               if options[:headers] && options[:headers].any?
                 response = HTTPX.get(url, headers: options[:headers])
               else
@@ -38,12 +37,14 @@ module OmniAuth
               execution_time = current_time_ms - start_time
               log_performance_metrics(url, execution_time, response)
 
-              # Cache successful responses - check if it's a successful response
+              parsed_response = parse_response(response)
+
+              # Cache successful responses
               if response.is_a?(HTTPX::Response) && response.status >= 200 && response.status < 300
-                cache_response(cache_key, response, options[:cache_ttl])
+                cache_response(cache_key, parsed_response, options[:cache_ttl])
               end
 
-              response
+              parsed_response
             rescue => e
               execution_time = current_time_ms - start_time
               log_error("[HTTP CLIENT] ❌ Request failed after #{execution_time}ms: #{e.message}")
@@ -51,12 +52,11 @@ module OmniAuth
             end
           end
 
-          # POST method for token exchanges and API calls
+          # POST request for token exchanges and API calls
           def post(url, body: nil, headers: {}, timeout: nil)
             start_time = current_time_ms
 
             begin
-              # Use HTTPX directly for POST requests
               if body && headers.any?
                 response = HTTPX.post(url, body: body, headers: headers)
               elsif body
@@ -68,7 +68,7 @@ module OmniAuth
               execution_time = current_time_ms - start_time
               log_performance_metrics(url, execution_time, response, method: "POST")
 
-              response
+              parse_response(response)
             rescue => e
               execution_time = current_time_ms - start_time
               log_error("[HTTP CLIENT] ❌ POST request failed after #{execution_time}ms: #{e.message}")
@@ -84,7 +84,33 @@ module OmniAuth
 
           private
 
-          # Simple in-memory cache
+          # Parse HTTP response and handle errors
+          def parse_response(response)
+            unless response.is_a?(HTTPX::Response)
+              log_error("[HTTP CLIENT] Invalid response type: #{response.class}")
+              raise "Invalid response type: #{response.class}"
+            end
+
+            # Check for HTTP errors
+            unless response.status >= 200 && response.status < 300
+              log_error("[HTTP CLIENT] HTTP #{response.status}: #{response.body[0..200]}")
+              raise "HTTP #{response.status}: #{response.reason}"
+            end
+
+            # Parse JSON if content-type indicates JSON
+            content_type = response.headers['content-type'] || ''
+            body = response.body.to_s
+
+            if content_type.include?('application/json')
+              JSON.parse(body)
+            else
+              body
+            end
+          rescue JSON::ParserError => e
+            log_error("[HTTP CLIENT] JSON parse error: #{e.message}, body: #{body[0..200]}")
+            body
+          end
+
           def cache
             @cache ||= Cache.new
           end
@@ -94,13 +120,12 @@ module OmniAuth
           end
 
           def cache_response(cache_key, response, ttl = nil)
-            return unless response.is_a?(HTTPX::Response) && response.status >= 200 && response.status < 300
-
             ttl ||= Configuration.cache_ttl
+            response_size = response.is_a?(String) ? response.bytesize : response.to_s.bytesize
 
             cache.set(cache_key, {
               response: response,
-              size: response.body.bytesize,
+              size: response_size,
               cached_at: Time.now
             }, ttl)
           end
@@ -108,7 +133,6 @@ module OmniAuth
           def log_performance_metrics(url, execution_time, response, method: "GET")
             return unless Configuration.performance_logging_enabled?
 
-            # Handle both HTTPX::Response and HTTPX::ErrorResponse
             if response.is_a?(HTTPX::Response)
               status = response.status
               size = response.body.bytesize
@@ -150,7 +174,7 @@ module OmniAuth
           end
         end
 
-        # Simple thread-safe cache implementation
+        # Thread-safe cache implementation
         class Cache
           def initialize
             @store = {}
