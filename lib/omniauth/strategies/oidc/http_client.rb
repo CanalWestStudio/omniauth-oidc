@@ -93,7 +93,7 @@ module OmniAuth
 
             # Check for HTTP errors
             unless response.status >= 200 && response.status < 300
-              log_error("[HTTP CLIENT] HTTP #{response.status}: #{response.body[0..200]}")
+              log_error("[HTTP CLIENT] HTTP #{response.status}: [RESPONSE BODY REDACTED]")
               raise "HTTP #{response.status}: #{response.reason}"
             end
 
@@ -107,7 +107,7 @@ module OmniAuth
               body
             end
           rescue JSON::ParserError => e
-            log_error("[HTTP CLIENT] JSON parse error: #{e.message}, body: #{body[0..200]}")
+            log_error("[HTTP CLIENT] JSON parse error: #{e.message}")
             body
           end
 
@@ -136,11 +136,11 @@ module OmniAuth
             if response.is_a?(HTTPX::Response)
               status = response.status
               size = response.body.bytesize
-              log_debug("[HTTP CLIENT] HTTPX::Response - Status: #{status}, Body size: #{size}")
+              log_debug("[HTTP CLIENT] Response - Status: #{status}, Body size: #{size}")
             else
               status = "ERROR"
               size = 0
-              log_debug("[HTTP CLIENT] Non-Response object: #{response.class} - #{response.inspect}")
+              log_debug("[HTTP CLIENT] Non-Response object: #{response.class}")
             end
 
             uri = URI.parse(url)

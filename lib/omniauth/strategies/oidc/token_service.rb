@@ -54,7 +54,7 @@ module OmniAuth
                 log_info("[TOKEN] ✅ Token exchange completed in #{execution_time}ms")
                 return TokenResponse.new(response)
               else
-                log_error("[TOKEN] ❌ Invalid token response: #{response}")
+                log_error("[TOKEN] ❌ Invalid token response (#{response.class})")
                 return nil
               end
 
@@ -93,7 +93,7 @@ module OmniAuth
                 log_info("[USERINFO] ✅ User info fetched in #{execution_time}ms")
                 return response
               else
-                log_error("[USERINFO] ❌ Invalid user info response: #{response}")
+                log_error("[USERINFO] ❌ Invalid user info response (#{response.class})")
                 return nil
               end
 
