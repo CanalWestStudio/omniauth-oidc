@@ -18,3 +18,5 @@ group :development, :test do
   gem "rubocop-rails-omakase", require: false, group: [ :development ]
   gem "webmock"
 end
+
+gem "httpx", "~> 1.5"
