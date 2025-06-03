@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
+require_relative 'discovery_service'
+
 module OmniAuth
   module Strategies
     class Oidc
-      # Token verification phase
+      # Token verification phase - Optimized for performance
       module Verify # rubocop:disable Metrics/ModuleLength
         def secret
           base64_decoded_jwt_secret || client_options.secret
@@ -23,7 +25,7 @@ module OmniAuth
           @public_key ||= if configured_public_key
                             configured_public_key
           elsif config.jwks_uri
-                            fetch_key
+                            fetch_key_optimized
           end
         end
 
@@ -31,6 +33,20 @@ module OmniAuth
 
         attr_reader :decoded_id_token
 
+        # Optimized key fetching with caching
+        def fetch_key_optimized
+          log_timing("[OIDC VERIFY] JWKS fetch") do
+            jwks_data = DiscoveryService.fetch_jwks(config.jwks_uri)
+            if jwks_data
+              parse_jwk_key(jwks_data)
+            else
+              log_error("[OIDC VERIFY] Failed to fetch JWKS, falling back to original method")
+              fetch_key
+            end
+          end
+        end
+
+        # Legacy method - kept for fallback
         def fetch_key
           parse_jwk_key(jwks_key)
         end
@@ -47,36 +63,41 @@ module OmniAuth
 
         def verify_id_token!(id_token)
           return unless id_token
-          decode_id_token(id_token).verify!(issuer: config.issuer,
-                                            client_id: client_options.identifier,
-                                            nonce: params["nonce"].presence || stored_nonce)
+
+          log_timing("[OIDC VERIFY] ID token verification") do
+            decode_id_token(id_token).verify!(issuer: config.issuer,
+                                              client_id: client_options.identifier,
+                                              nonce: params["nonce"].presence || stored_nonce)
+          end
         end
 
         def decode_id_token(id_token)
-          decoded = JSON::JWT.decode(id_token, :skip_verification)
-          algorithm = decoded.algorithm.to_sym
+          log_timing("[OIDC VERIFY] ID token decode") do
+            decoded = JSON::JWT.decode(id_token, :skip_verification)
+            algorithm = decoded.algorithm.to_sym
 
-          validate_client_algorithm!(algorithm)
+            validate_client_algorithm!(algorithm)
 
-          keyset =
-            case algorithm
-            when :HS256, :HS384, :HS512
-              secret
-            else
-              public_key
-            end
+            keyset =
+              case algorithm
+              when :HS256, :HS384, :HS512
+                secret
+              else
+                public_key
+              end
 
-          decoded.verify!(keyset)
-          @decoded_id_token = ::OpenIDConnect::ResponseObject::IdToken.new(decoded)
+            decoded.verify!(keyset)
+            @decoded_id_token = ::OpenIDConnect::ResponseObject::IdToken.new(decoded)
+          end
         rescue JSON::JWK::Set::KidNotFound
           # Workaround for https://github.com/nov/json-jwt/pull/92#issuecomment-824654949
           raise if decoded&.header&.key?("kid")
 
-          decoded = decode_with_each_key!(id_token, keyset)
-
-          raise unless decoded
-
-          @decoded_id_token = decoded
+          log_timing("[OIDC VERIFY] Fallback key verification") do
+            decoded = decode_with_each_key!(id_token, keyset)
+            raise unless decoded
+            @decoded_id_token = decoded
+          end
         end
 
         # Check for jwt to match defined client_signing_alg
@@ -145,16 +166,39 @@ module OmniAuth
         def user_info
           return @user_info if @user_info
 
-          if id_token_raw_attributes
-            merged_user_info = access_token.userinfo!.raw_attributes.merge(id_token_raw_attributes)
+          log_timing("[OIDC VERIFY] User info processing") do
+            if id_token_raw_attributes
+              merged_user_info = access_token.userinfo!.raw_attributes.merge(id_token_raw_attributes)
 
-            @user_info = ::OpenIDConnect::ResponseObject::UserInfo.new(
-              # transform keys to ensure valid UserInfo object
-              merged_user_info.deep_transform_keys(&:underscore)
-            )
-          else
-            @user_info = access_token.userinfo!
+              @user_info = ::OpenIDConnect::ResponseObject::UserInfo.new(
+                # transform keys to ensure valid UserInfo object
+                merged_user_info.deep_transform_keys(&:underscore)
+              )
+            else
+              @user_info = access_token.userinfo!
+            end
           end
+        end
+
+        # Performance logging helpers
+        def log_timing(description, &block)
+          start_time = Time.now
+          result = yield
+          duration = ((Time.now - start_time) * 1000).round(1)
+          log_info("#{description} completed in #{duration}ms")
+          result
+        end
+
+        def log_info(message)
+          logger.info(message) if logger
+        end
+
+        def log_error(message)
+          logger.error(message) if logger
+        end
+
+        def logger
+          @logger ||= defined?(Rails) ? Rails.logger : Logger.new(STDOUT)
         end
       end
     end

@@ -14,7 +14,7 @@ Dir[File.join(File.dirname(__FILE__), "oidc", "*.rb")].sort.each { |file| requir
 
 module OmniAuth
   module Strategies
-    # OIDC strategy for omniauth
+    # OIDC strategy for omniauth - Optimized for performance
     class Oidc
       include OmniAuth::Strategy
       include Callback
@@ -96,14 +96,24 @@ module OmniAuth
         @client ||= ::OpenIDConnect::Client.new(client_options)
       end
 
-      # Config is build from the json response from the OIDC config endpoint
+      # Optimized config fetching with caching
       def config
         unless client_options.config_endpoint || params["config_endpoint"]
-          raise Error,
-                "Configuration endpoint is missing from options"
+          raise Error, "Configuration endpoint is missing from options"
         end
 
-        @config ||= OpenidConfigParser.fetch_openid_configuration(client_options.config_endpoint)
+        endpoint = client_options.config_endpoint || params["config_endpoint"]
+
+        # Use optimized discovery service
+        @config ||= DiscoveryService.fetch_configuration(endpoint)
+
+        unless @config
+          # Fallback to original method if optimized version fails
+          log_info("[OIDC CONFIG] Falling back to openid_config_parser")
+          @config ||= OpenidConfigParser.fetch_openid_configuration(endpoint)
+        end
+
+        @config
       end
 
       # Detects if current request is for the logout url and makes a redirect to end session with OIDC provider
@@ -187,6 +197,19 @@ module OmniAuth
 
       def logout_path_pattern
         @logout_path_pattern ||= /\A#{Regexp.quote(request.base_url)}#{options.logout_path}/
+      end
+
+      # Performance logging helpers
+      def log_info(message)
+        logger.info(message) if logger
+      end
+
+      def log_error(message)
+        logger.error(message) if logger
+      end
+
+      def logger
+        @logger ||= defined?(Rails) ? Rails.logger : Logger.new(STDOUT)
       end
 
       # Override for the CallbackError class
