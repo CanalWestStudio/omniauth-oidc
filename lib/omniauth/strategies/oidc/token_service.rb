@@ -38,6 +38,13 @@ module OmniAuth
               # Prepare form data for token exchange
               form_data = URI.encode_www_form(token_params)
 
+              log_info("[TOKEN] Request details:")
+              log_info("[TOKEN]   URL: #{token_endpoint}")
+              log_info("[TOKEN]   Method: POST")
+              log_info("[TOKEN]   Content-Type: #{headers['Content-Type']}")
+              log_info("[TOKEN]   Authorization: #{headers['Authorization'] ? 'Basic [REDACTED]' : 'MISSING'}")
+              log_info("[TOKEN]   Body length: #{form_data.length} bytes")
+
               # Use the modernized HTTP client
               response = HttpClient.post(
                 token_endpoint,
@@ -60,7 +67,9 @@ module OmniAuth
                 end
               else
                 status = response.is_a?(HTTPX::Response) ? response.status : "ERROR"
+                error_body = response.is_a?(HTTPX::Response) ? response.body : "No response body"
                 log_error("[TOKEN] ❌ HTTP #{status}: Token exchange failed")
+                log_error("[TOKEN] ❌ Error response body: #{error_body}")
                 return nil
               end
 
@@ -124,20 +133,28 @@ module OmniAuth
               client_id: client_options.identifier
             }
 
-            # Add client secret if using client_secret_post
-            if client_options.secret && extra_params[:client_auth_method] != :client_secret_basic
+            # For Intuit, we typically use client_secret_basic (in Authorization header)
+            # Only add client_secret to body if explicitly using client_secret_post
+            if client_options.secret && extra_params[:client_auth_method] == :client_secret_post
               params[:client_secret] = client_options.secret
+              log_debug("[TOKEN] Using client_secret_post authentication method")
+            else
+              log_debug("[TOKEN] Using client_secret_basic authentication method (Authorization header)")
             end
 
             # Add PKCE verifier if present
             if extra_params[:code_verifier]
               params[:code_verifier] = extra_params[:code_verifier]
+              log_debug("[TOKEN] Added PKCE code_verifier")
             end
 
-            # Add scope if required
-            if extra_params[:scope]
+            # Add scope if required and send_scope_to_token_endpoint is true
+            if extra_params[:scope] && extra_params[:send_scope_to_token_endpoint]
               params[:scope] = Array(extra_params[:scope]).join(' ')
+              log_debug("[TOKEN] Added scope: #{params[:scope]}")
             end
+
+            log_info("[TOKEN] Token params: grant_type=#{params[:grant_type]}, redirect_uri=#{params[:redirect_uri]}, client_id=#{params[:client_id][0..10]}...")
 
             params
           end
@@ -148,10 +165,17 @@ module OmniAuth
               'Accept' => 'application/json'
             }
 
-            # Add basic auth header if using client_secret_basic (default)
-            if client_options.secret
-              auth_string = Base64.strict_encode64("#{client_options.identifier}:#{client_options.secret}")
+            # Add basic auth header if using client_secret_basic (default for Intuit)
+            if client_options.secret && client_options.identifier
+              # Intuit expects: "Basic " + base64encode(client_id + ":" + client_secret)
+              credentials = "#{client_options.identifier}:#{client_options.secret}"
+              auth_string = Base64.strict_encode64(credentials)
               headers['Authorization'] = "Basic #{auth_string}"
+
+              log_info("[TOKEN] Built Basic Auth for client_id: #{client_options.identifier[0..10]}...")
+              log_info("[TOKEN] Authorization header length: #{headers['Authorization'].length}")
+            else
+              log_error("[TOKEN] Missing client credentials! identifier: #{client_options.identifier ? 'present' : 'missing'}, secret: #{client_options.secret ? 'present' : 'missing'}")
             end
 
             headers
@@ -187,6 +211,10 @@ module OmniAuth
 
           def log_error(message)
             logger.error(message) if logger
+          end
+
+          def log_debug(message)
+            logger.debug(message) if logger
           end
 
           def logger
