@@ -59,6 +59,11 @@ module OmniAuth
               extra_params
             )
 
+            unless @token_response
+              log_error("[OIDC CALLBACK] Token exchange failed - no token response received")
+              raise CallbackError, error: :token_exchange_failed, reason: "Failed to exchange authorization code for tokens"
+            end
+
             @access_token = @token_response.access_token
 
             # Verify ID token if present

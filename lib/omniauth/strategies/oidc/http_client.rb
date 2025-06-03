@@ -94,7 +94,7 @@ module OmniAuth
             # Check for HTTP errors
             unless response.status >= 200 && response.status < 300
               log_error("[HTTP CLIENT] HTTP #{response.status}: [RESPONSE BODY REDACTED]")
-              raise "HTTP #{response.status}: #{response.reason}"
+              raise "HTTP #{response.status}"
             end
 
             # Parse JSON if content-type indicates JSON
