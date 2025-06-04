@@ -102,7 +102,27 @@ module OmniAuth
 
         user_info[:name] = source_data['name']
         user_info[:email] = source_data['email']
-        user_info[:email_verified] = source_data['emailVerified'] || source_data['email_verified'] # Support both formats
+
+        # Debug emailVerified processing
+        email_verified = source_data['emailVerified'] || source_data['email_verified']
+        if logger
+          logger.debug("[OIDC DEBUG] emailVerified processing:")
+          logger.debug("  emailVerified (camelCase): #{source_data['emailVerified'].inspect} (#{source_data['emailVerified'].class})")
+          logger.debug("  email_verified (snake_case): #{source_data['email_verified'].inspect} (#{source_data['email_verified'].class})")
+          logger.debug("  final value: #{email_verified.inspect} (#{email_verified.class})")
+        end
+
+        # Safely convert emailVerified to boolean to handle various data types
+        user_info[:email_verified] = case email_verified
+                                     when true, 'true', 1, '1'
+                                       true
+                                     when false, 'false', 0, '0', nil
+                                       false
+                                     else
+                                       # For any other value, convert to boolean based on presence
+                                       !email_verified.nil? && !email_verified.to_s.empty?
+                                     end
+
         user_info[:first_name] = source_data['givenName'] || source_data['given_name'] # Support both formats
         user_info[:last_name] = source_data['familyName'] || source_data['family_name'] # Support both formats
         user_info[:phone] = source_data['phoneNumber'] || source_data['phone_number'] # Support both formats
