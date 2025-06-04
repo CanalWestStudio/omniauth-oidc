@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'forwardable'
 
 module OmniAuth
   module Strategies
@@ -8,6 +9,8 @@ module OmniAuth
       module Http
         # HTTP response wrapper for consistent response handling
         class Response
+          extend Forwardable
+
           attr_reader :status, :body, :headers, :raw_response
 
           def initialize(raw_response)
@@ -18,11 +21,11 @@ module OmniAuth
           end
 
           def success?
-            status >= 200 && status < 300
+            (200...300).cover?(status)
           end
 
           def client_error?
-            status >= 400 && status < 500
+            (400...500).cover?(status)
           end
 
           def server_error?
@@ -62,15 +65,13 @@ module OmniAuth
             when Hash
               @raw_response[:status] || @raw_response['status'] || 200
             else
-              200 # Default for successful responses that don't include status
+              200
             end
           end
 
           def extract_body
             case @raw_response
-            when Net::HTTPResponse
-              @raw_response.body
-            when Faraday::Response
+            when Net::HTTPResponse, Faraday::Response
               @raw_response.body
             when Hash
               @raw_response.to_json
@@ -100,8 +101,6 @@ module OmniAuth
               headers['content-type'] || headers['Content-Type']
             when Array
               headers['content-type']&.first || headers['Content-Type']&.first
-            else
-              nil
             end
           end
 
@@ -109,15 +108,17 @@ module OmniAuth
             return nil if body.nil? || body.empty?
 
             # Faraday may have already parsed JSON responses
-            if @raw_response.is_a?(Faraday::Response) && body.is_a?(Hash)
-              return body
-            end
+            return body if faraday_parsed_json?
 
-            if json?
-              JSON.parse(body)
-            else
-              body
-            end
+            json? ? safe_json_parse : body
+          end
+
+          def faraday_parsed_json?
+            @raw_response.is_a?(Faraday::Response) && body.is_a?(Hash)
+          end
+
+          def safe_json_parse
+            JSON.parse(body)
           rescue JSON::ParserError
             body
           end

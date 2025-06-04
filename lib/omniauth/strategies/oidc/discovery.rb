@@ -49,31 +49,32 @@ module OmniAuth
           config_data
         end
 
-        # Individual endpoint accessors
+        # Individual endpoint accessors - prefer configuration over discovery
         def issuer
           oidc_configuration['issuer']
         end
 
         def authorization_endpoint
-          configuration.authorization_endpoint || oidc_configuration['authorization_endpoint']
+          endpoint_with_fallback(:authorization_endpoint, 'authorization_endpoint')
         end
 
         def token_endpoint
-          configuration.token_endpoint || oidc_configuration['token_endpoint']
+          endpoint_with_fallback(:token_endpoint, 'token_endpoint')
         end
 
         def userinfo_endpoint
-          configuration.userinfo_endpoint || oidc_configuration['userinfo_endpoint']
+          endpoint_with_fallback(:userinfo_endpoint, 'userinfo_endpoint')
         end
 
         def jwks_uri
-          configuration.jwks_uri || oidc_configuration['jwks_uri']
+          endpoint_with_fallback(:jwks_uri, 'jwks_uri')
         end
 
         def end_session_endpoint
-          configuration.end_session_endpoint || oidc_configuration['end_session_logout_endpoint']
+          endpoint_with_fallback(:end_session_endpoint, 'end_session_logout_endpoint')
         end
 
+        # Configuration discovery accessors with defaults
         def scopes_supported
           oidc_configuration['scopes_supported'] || ['openid']
         end
@@ -95,76 +96,93 @@ module OmniAuth
           cache_key = jwks_uri
           return nil unless cache_key
 
-          # Check class-level cache first
-          if @@jwks_cache[cache_key] && jwks_cache_valid?(cache_key)
-            log_info("[OIDC Discovery] Using cached JWKS")
-            return @@jwks_cache[cache_key][:data]
+          fetch_with_cache(cache_key, @@jwks_cache, JWKS_CACHE_TTL, 'JWKS') do
+            fetch_jwks
           end
-
-          # Fetch fresh JWKS
-          jwks_data = fetch_jwks
-
-          # Cache it
-          @@jwks_cache[cache_key] = {
-            data: jwks_data,
-            cached_at: Time.now
-          }
-
-          jwks_data
         end
 
         private
 
-        def fetch_oidc_configuration
-          endpoint = configuration.config_endpoint
+        def endpoint_with_fallback(config_method, discovery_key)
+          configuration.send(config_method) || oidc_configuration[discovery_key]
+        end
 
-          log_info("[OIDC Discovery] Fetching configuration from #{endpoint}")
-          start_time = Time.now
-
-          # Use shorter timeout for better performance
-          config_data = Http::Client.get(endpoint, timeout: 5)  # Reduced from 10s
-
-          elapsed_time = ((Time.now - start_time) * 1000).round(2)
-          log_info("[OIDC Discovery] Configuration fetched in #{elapsed_time}ms")
-
-          unless config_data.is_a?(Hash)
-            raise OmniauthOidc::Errors::ConfigurationError, "Invalid configuration response format"
+        def fetch_with_cache(cache_key, cache_store, ttl, log_name)
+          if cache_store[cache_key] && cache_valid?(cache_store[cache_key], ttl)
+            log_info("[OIDC Discovery] Using cached #{log_name}")
+            return cache_store[cache_key][:data]
           end
 
-          validate_required_configuration!(config_data)
-          config_data
+          data = yield
+
+          cache_store[cache_key] = {
+            data: data,
+            cached_at: Time.now
+          }
+
+          data
+        end
+
+        def cache_valid?(cache_entry, ttl)
+          return false unless cache_entry
+
+          Time.now - cache_entry[:cached_at] < ttl
+        end
+
+        def fetch_oidc_configuration
+          fetch_with_timing(configuration.config_endpoint, 'configuration') do |endpoint|
+            config_data = Http::Client.get(endpoint, timeout: 5)
+            validate_configuration_response!(config_data)
+            config_data
+          end
         rescue => e
-          elapsed_time = ((Time.now - start_time) * 1000).round(2)
-          log_error("[OIDC Discovery] Configuration fetch failed after #{elapsed_time}ms: #{e.message}")
           raise OmniauthOidc::Errors::ConfigurationError, "Failed to fetch OIDC configuration: #{e.message}"
         end
 
         def fetch_jwks
           return nil unless jwks_uri
 
-          log_info("[OIDC Discovery] Fetching JWKS from #{jwks_uri}")
+          fetch_with_timing(jwks_uri, 'JWKS') do |endpoint|
+            jwks_data = Http::Client.get(endpoint, timeout: 5)
+            validate_jwks_response!(jwks_data)
+            jwks_data
+          end
+        rescue => e
+          raise OmniauthOidc::Errors::VerificationError, "Failed to fetch JWKS: #{e.message}"
+        end
+
+        def fetch_with_timing(endpoint, description)
+          log_info("[OIDC Discovery] Fetching #{description} from #{endpoint}")
           start_time = Time.now
 
-          # Use shorter timeout for better performance
-          jwks_data = Http::Client.get(jwks_uri, timeout: 5)  # Reduced from 10s
+          result = yield(endpoint)
 
           elapsed_time = ((Time.now - start_time) * 1000).round(2)
-          log_info("[OIDC Discovery] JWKS fetched in #{elapsed_time}ms")
+          log_info("[OIDC Discovery] #{description.capitalize} fetched in #{elapsed_time}ms")
 
+          result
+        rescue => e
+          elapsed_time = ((Time.now - start_time) * 1000).round(2)
+          log_error("[OIDC Discovery] #{description.capitalize} fetch failed after #{elapsed_time}ms: #{e.message}")
+          raise
+        end
+
+        def validate_configuration_response!(config_data)
+          unless config_data.is_a?(Hash)
+            raise OmniauthOidc::Errors::ConfigurationError, "Invalid configuration response format"
+          end
+
+          validate_required_configuration!(config_data)
+        end
+
+        def validate_jwks_response!(jwks_data)
           unless jwks_data.is_a?(Hash) && jwks_data['keys']
             raise OmniauthOidc::Errors::VerificationError, "Invalid JWKS response format"
           end
-
-          jwks_data
-        rescue => e
-          elapsed_time = ((Time.now - start_time) * 1000).round(2)
-          log_error("[OIDC Discovery] JWKS fetch failed after #{elapsed_time}ms: #{e.message}")
-          raise OmniauthOidc::Errors::VerificationError, "Failed to fetch JWKS: #{e.message}"
         end
 
         def validate_required_configuration!(config)
           required_fields = %w[issuer authorization_endpoint token_endpoint]
-
           missing_fields = required_fields.select { |field| config[field].nil? || config[field].empty? }
 
           if missing_fields.any?
@@ -172,7 +190,6 @@ module OmniAuth
                   "Missing required configuration fields: #{missing_fields.join(', ')}"
           end
 
-          # Validate issuer matches expected format
           unless valid_issuer?(config['issuer'])
             raise OmniauthOidc::Errors::ConfigurationError, "Invalid issuer format: #{config['issuer']}"
           end
@@ -188,27 +205,19 @@ module OmniAuth
         end
 
         def jwks_cache_valid?(cache_key)
-          return false unless @@jwks_cache[cache_key]
-
-          Time.now - @@jwks_cache[cache_key][:cached_at] < JWKS_CACHE_TTL
+          cache_valid?(@@jwks_cache[cache_key], JWKS_CACHE_TTL)
         end
 
         def config_cache_valid?(cache_key)
-          return false unless @@config_cache[cache_key]
-
-          Time.now - @@config_cache[cache_key][:cached_at] < CACHE_TTL
+          cache_valid?(@@config_cache[cache_key], CACHE_TTL)
         end
 
         def log_info(message)
-          return unless logger
-
-          logger.info(message)
+          logger&.info(message)
         end
 
         def log_error(message)
-          return unless logger
-
-          logger.error(message)
+          logger&.error(message)
         end
 
         def logger
@@ -216,7 +225,7 @@ module OmniAuth
             if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
               Rails.logger
             elsif defined?(Logger)
-              Logger.new(STDOUT)
+              Logger.new($stdout)
             end
           end
         end
