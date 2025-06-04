@@ -125,6 +125,11 @@ module OmniAuth
           extra_data[:realmId] = @id_token_data['realmId']
         end
 
+        # Also check for realmId in request params (Intuit sends it as a parameter)
+        if request.params['realmId']
+          extra_data[:realmId] = request.params['realmId']
+        end
+
         extra_data
       end
 
@@ -259,7 +264,7 @@ module OmniAuth
 
       def handle_implicit_flow
         # For implicit flow, we get the ID token directly
-        @id_token_raw = params["id_token"]
+        @id_token_raw = request.params["id_token"]
         # TODO: Verify ID token signature and claims
         # For now, just decode without verification (not recommended for production)
         @id_token_data = JSON::JWT.decode(@id_token_raw, :skip_verification) if @id_token_raw
@@ -270,7 +275,7 @@ module OmniAuth
       def exchange_code_for_tokens
         token_params = {
           grant_type: 'authorization_code',
-          code: params["code"],
+          code: request.params["code"],
           redirect_uri: redirect_uri,
           client_id: configuration.client_id
         }
@@ -346,7 +351,7 @@ module OmniAuth
 
       def validate_state!
         stored_state = session.delete("omniauth.state")
-        current_state = params["state"]
+        current_state = request.params["state"]
 
         return if stored_state == current_state
 
@@ -354,17 +359,17 @@ module OmniAuth
       end
 
       def validate_error_params!
-        return unless params["error"]
+        return unless request.params["error"]
 
-        error_description = params["error_description"] || params["error_reason"]
-        raise OmniauthOidc::Errors::TokenError, "#{params['error']}: #{error_description}"
+        error_description = request.params["error_description"] || request.params["error_reason"]
+        raise OmniauthOidc::Errors::TokenError, "#{request.params['error']}: #{error_description}"
       end
 
       def validate_response_type!
-        return if params.key?(configuration.response_type)
+        return if request.params.key?(configuration.response_type)
 
         error_info = RESPONSE_TYPE_EXCEPTIONS[configuration.response_type]
-        fail!(error_info[:key], error_info[:exception_class].new(params["error"]))
+        fail!(error_info[:key], error_info[:exception_class].new(request.params["error"]))
       end
 
       # Session management
