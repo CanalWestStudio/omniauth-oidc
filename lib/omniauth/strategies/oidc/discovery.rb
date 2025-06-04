@@ -7,8 +7,13 @@ module OmniAuth
     class Oidc
       # OIDC Discovery service - handles configuration and JWKS fetching
       class Discovery
-        CACHE_TTL = 3600 # 1 hour cache for configuration
+        # More aggressive caching for performance
+        CACHE_TTL = 900 # 15 minutes cache for configuration (up from 1 hour)
         JWKS_CACHE_TTL = 300 # 5 minutes cache for JWKS
+
+        # Class-level cache to share across instances
+        @@config_cache = {}
+        @@jwks_cache = {}
 
         attr_reader :configuration
 
@@ -16,9 +21,32 @@ module OmniAuth
           @configuration = configuration
         end
 
-        # Get OIDC configuration from discovery endpoint
+        # Clear class-level cache (useful for testing)
+        def self.clear_cache!
+          @@config_cache.clear
+          @@jwks_cache.clear
+        end
+
+        # Get OIDC configuration from discovery endpoint with caching
         def oidc_configuration
-          @oidc_configuration ||= fetch_oidc_configuration
+          cache_key = configuration.config_endpoint
+
+          # Check class-level cache first
+          if @@config_cache[cache_key] && config_cache_valid?(cache_key)
+            log_info("[OIDC Discovery] Using cached configuration")
+            return @@config_cache[cache_key][:data]
+          end
+
+          # Fetch fresh configuration
+          config_data = fetch_oidc_configuration
+
+          # Cache it
+          @@config_cache[cache_key] = {
+            data: config_data,
+            cached_at: Time.now
+          }
+
+          config_data
         end
 
         # Individual endpoint accessors
@@ -64,11 +92,25 @@ module OmniAuth
 
         # Fetch JWKS for token verification
         def jwks
-          return @jwks if @jwks && jwks_cache_valid?
+          cache_key = jwks_uri
+          return nil unless cache_key
 
-          @jwks = fetch_jwks
-          @jwks_cached_at = Time.now
-          @jwks
+          # Check class-level cache first
+          if @@jwks_cache[cache_key] && jwks_cache_valid?(cache_key)
+            log_info("[OIDC Discovery] Using cached JWKS")
+            return @@jwks_cache[cache_key][:data]
+          end
+
+          # Fetch fresh JWKS
+          jwks_data = fetch_jwks
+
+          # Cache it
+          @@jwks_cache[cache_key] = {
+            data: jwks_data,
+            cached_at: Time.now
+          }
+
+          jwks_data
         end
 
         private
@@ -77,19 +119,23 @@ module OmniAuth
           endpoint = configuration.config_endpoint
 
           log_info("[OIDC Discovery] Fetching configuration from #{endpoint}")
+          start_time = Time.now
 
-          config_data = Http::Client.get(endpoint, timeout: 10)
+          # Use shorter timeout for better performance
+          config_data = Http::Client.get(endpoint, timeout: 5)  # Reduced from 10s
+
+          elapsed_time = ((Time.now - start_time) * 1000).round(2)
+          log_info("[OIDC Discovery] Configuration fetched in #{elapsed_time}ms")
 
           unless config_data.is_a?(Hash)
             raise OmniauthOidc::Errors::ConfigurationError, "Invalid configuration response format"
           end
 
           validate_required_configuration!(config_data)
-
-          log_info("[OIDC Discovery] Configuration fetched successfully")
           config_data
         rescue => e
-          log_error("[OIDC Discovery] Configuration fetch failed: #{e.message}")
+          elapsed_time = ((Time.now - start_time) * 1000).round(2)
+          log_error("[OIDC Discovery] Configuration fetch failed after #{elapsed_time}ms: #{e.message}")
           raise OmniauthOidc::Errors::ConfigurationError, "Failed to fetch OIDC configuration: #{e.message}"
         end
 
@@ -97,17 +143,22 @@ module OmniAuth
           return nil unless jwks_uri
 
           log_info("[OIDC Discovery] Fetching JWKS from #{jwks_uri}")
+          start_time = Time.now
 
-          jwks_data = Http::Client.get(jwks_uri, timeout: 10)
+          # Use shorter timeout for better performance
+          jwks_data = Http::Client.get(jwks_uri, timeout: 5)  # Reduced from 10s
+
+          elapsed_time = ((Time.now - start_time) * 1000).round(2)
+          log_info("[OIDC Discovery] JWKS fetched in #{elapsed_time}ms")
 
           unless jwks_data.is_a?(Hash) && jwks_data['keys']
             raise OmniauthOidc::Errors::VerificationError, "Invalid JWKS response format"
           end
 
-          log_info("[OIDC Discovery] JWKS fetched successfully")
           jwks_data
         rescue => e
-          log_error("[OIDC Discovery] JWKS fetch failed: #{e.message}")
+          elapsed_time = ((Time.now - start_time) * 1000).round(2)
+          log_error("[OIDC Discovery] JWKS fetch failed after #{elapsed_time}ms: #{e.message}")
           raise OmniauthOidc::Errors::VerificationError, "Failed to fetch JWKS: #{e.message}"
         end
 
@@ -136,10 +187,16 @@ module OmniAuth
           false
         end
 
-        def jwks_cache_valid?
-          return false unless @jwks_cached_at
+        def jwks_cache_valid?(cache_key)
+          return false unless @@jwks_cache[cache_key]
 
-          Time.now - @jwks_cached_at < JWKS_CACHE_TTL
+          Time.now - @@jwks_cache[cache_key][:cached_at] < JWKS_CACHE_TTL
+        end
+
+        def config_cache_valid?(cache_key)
+          return false unless @@config_cache[cache_key]
+
+          Time.now - @@config_cache[cache_key][:cached_at] < CACHE_TTL
         end
 
         def log_info(message)

@@ -4,6 +4,9 @@ require "test_helper"
 
 class DiscoveryTest < Minitest::Test
   def setup
+    # Clear class-level cache before each test
+    OmniAuth::Strategies::Oidc::Discovery.clear_cache!
+
     @options = default_oidc_options
     @request = OpenStruct.new(params: {})
     @configuration = OmniAuth::Strategies::Oidc::Configuration.new(@options, @request)

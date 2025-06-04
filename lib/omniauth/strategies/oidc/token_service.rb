@@ -1,4 +1,4 @@
-require_relative 'http_client'
+require_relative 'http/client'
 require 'uri'
 require 'base64'
 
@@ -29,7 +29,7 @@ module OmniAuth
               # Make token request
               log_info("[OIDC TOKEN] Exchanging code for tokens at #{token_endpoint}")
 
-              response = HttpClient.post(
+              response = Http::Client.post(
                 token_endpoint,
                 body: URI.encode_www_form(token_params),
                 headers: headers,
@@ -40,7 +40,7 @@ module OmniAuth
                 log_info("[OIDC TOKEN] Token exchange successful")
                 TokenResponse.new(response)
               else
-                log_error("Invalid token response: #{response}")
+                log_error("Invalid token response format")
                 raise "Invalid token response from provider"
               end
             end
@@ -60,7 +60,7 @@ module OmniAuth
 
               log_info("[OIDC USERINFO] Fetching user info from #{userinfo_endpoint}")
 
-              response = HttpClient.get(
+              response = Http::Client.get(
                 userinfo_endpoint,
                 headers: headers,
                 timeout: TOKEN_TIMEOUT
@@ -70,7 +70,7 @@ module OmniAuth
                 log_info("[OIDC USERINFO] User info fetch successful")
                 response
               else
-                log_error("Invalid userinfo response: #{response}")
+                log_error("Invalid userinfo response format")
                 nil
               end
             end

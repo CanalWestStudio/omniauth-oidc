@@ -8,7 +8,6 @@ require "omniauth"
 require "openid_connect"
 require "openid_config_parser"
 require "forwardable"
-require "httparty"
 require "securerandom"
 
 # Require core service objects and components we've built
