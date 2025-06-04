@@ -9,54 +9,55 @@ require "openid_connect"
 require "openid_config_parser"
 require "forwardable"
 require "httparty"
+require "securerandom"
 
-Dir[File.join(File.dirname(__FILE__), "oidc", "*.rb")].sort.each { |file| require_relative file }
+# Require core service objects and components we've built
+require_relative "oidc/configuration"
+require_relative "oidc/discovery"
+require_relative "oidc/http/client"
+require_relative "oidc/http/response"
+require_relative "oidc/errors/configuration_error"
+require_relative "oidc/errors/token_error"
+require_relative "oidc/errors/verification_error"
 
 module OmniAuth
   module Strategies
-    # OIDC strategy for omniauth - Optimized for performance
+    # OIDC strategy for omniauth - Clean orchestrator following single responsibility
     class Oidc
       include OmniAuth::Strategy
-      include Callback
-      include Request
-      include Serializer
-      include Verify
-
-      extend Forwardable
 
       RESPONSE_TYPE_EXCEPTIONS = {
-        "id_token" => { exception_class: OmniauthOidc::MissingIdTokenError, key: :missing_id_token }.freeze,
-        "code" => { exception_class: OmniauthOidc::MissingCodeError, key: :missing_code }.freeze
+        "id_token" => { exception_class: OmniauthOidc::Errors::MissingIdTokenError, key: :missing_id_token }.freeze,
+        "code" => { exception_class: OmniauthOidc::Errors::MissingCodeError, key: :missing_code }.freeze
       }.freeze
 
-      def_delegator :request, :params
-
-      option :name, :oidc                                   # to separate each oidc provider available in the app
-      option(:client_options, identifier: nil,              # client id, required
-                              secret: nil,                  # client secret, required
-                              host: nil,                    # oidc provider host, optional
-                              scheme: "https",              # connection scheme, optional
-                              port: 443,                    # connection port, optional
-                              config_endpoint: nil,         # all data will be fetched from here, required
-                              authorization_endpoint: nil,  # optional
-                              token_endpoint: nil,          # optional
-                              userinfo_endpoint: nil,       # optional
-                              jwks_uri: nil,                # optional
-                              end_session_endpoint: nil,    # optional
-                              environment: nil)             # optional
+      # Configuration options
+      option :name, :oidc
+      option(:client_options, identifier: nil,
+                              secret: nil,
+                              host: nil,
+                              scheme: "https",
+                              port: 443,
+                              config_endpoint: nil,
+                              authorization_endpoint: nil,
+                              token_endpoint: nil,
+                              userinfo_endpoint: nil,
+                              jwks_uri: nil,
+                              end_session_endpoint: nil,
+                              environment: nil)
 
       option :issuer
       option :client_signing_alg
       option :jwt_secret_base64
       option :client_jwk_signing_key
       option :client_x509_signing_key
-      option :scope, [ :openid ]
-      option :response_type, "code" # ['code', 'id_token']
+      option :scope, [:openid]
+      option :response_type, "code"
       option :require_state, true
       option :state
-      option :response_mode # [:query, :fragment, :form_post, :web_message]
-      option :display, nil # [:page, :popup, :touch, :wap]
-      option :prompt, nil # [:none, :login, :consent, :select_account]
+      option :response_mode
+      option :display, nil
+      option :prompt, nil
       option :hd, nil
       option :max_age
       option :ui_locales
@@ -78,141 +79,352 @@ module OmniAuth
         },
         code_challenge_method: "S256"
       }
-
       option :logout_path, "/logout"
 
+      # Public API methods
       def uid
-        user_info.raw_attributes[options.uid_field.to_sym] || user_info.sub
+        # Get UID from userinfo or ID token
+        uid_field = configuration.uid_field
+
+        if @user_info_data && (@user_info_data[uid_field] || @user_info_data[uid_field.to_s])
+          @user_info_data[uid_field] || @user_info_data[uid_field.to_s]
+        elsif @id_token_data && (@id_token_data[uid_field] || @id_token_data[uid_field.to_s])
+          @id_token_data[uid_field] || @id_token_data[uid_field.to_s]
+        else
+          "unknown"
+        end
       end
 
-      info { serialized_user_info }
+      info do
+        # Build user info from available data
+        user_info = {}
 
-      extra { serialized_extra }
+        source_data = @user_info_data || @id_token_data || {}
 
-      credentials { serialized_credentials }
+        user_info[:name] = source_data['name']
+        user_info[:email] = source_data['email']
+        user_info[:email_verified] = source_data['emailVerified'] || source_data['email_verified'] # Support both formats
+        user_info[:first_name] = source_data['givenName'] || source_data['given_name'] # Support both formats
+        user_info[:last_name] = source_data['familyName'] || source_data['family_name'] # Support both formats
+        user_info[:phone] = source_data['phoneNumber'] || source_data['phone_number'] # Support both formats
+        user_info[:picture] = source_data['picture']
+        user_info[:locale] = source_data['locale']
 
-      # Initialize OpenIDConnect Client with options
-      def client
-        @client ||= ::OpenIDConnect::Client.new(client_options)
+        user_info.compact
       end
 
-      # Optimized config fetching with caching
-      def config
-        unless client_options.config_endpoint || params["config_endpoint"]
-          raise Error, "Configuration endpoint is missing from options"
+      extra do
+        extra_data = { scope: configuration.scope }
+
+        # Include raw user info if available
+        extra_data[:raw_info] = @user_info_data if @user_info_data
+
+        # Include ID token claims if available
+        extra_data[:id_token] = @id_token_data if @id_token_data
+
+        # For Intuit integration - include realmId if present
+        if @id_token_data && @id_token_data['realmId']
+          extra_data[:realmId] = @id_token_data['realmId']
         end
 
-        endpoint = client_options.config_endpoint || params["config_endpoint"]
-
-        # Use optimized discovery service
-        @config ||= DiscoveryService.fetch_configuration(endpoint)
-
-        unless @config
-          # Fallback to original method if optimized version fails
-          log_info("[OIDC CONFIG] Falling back to openid_config_parser")
-          @config ||= OpenidConfigParser.fetch_openid_configuration(endpoint)
+        # Also check for realmId in request params (Intuit sends it as a parameter)
+        if request.params['realmId']
+          extra_data[:realmId] = request.params['realmId']
         end
 
-        @config
+        extra_data
       end
 
-      # Detects if current request is for the logout url and makes a redirect to end session with OIDC provider
+      credentials do
+        creds = {}
+
+        if @access_token
+          creds[:token] = @access_token
+          creds[:expires_at] = Time.now.to_i + 3600 # Default 1 hour if not specified
+        end
+
+        if @refresh_token
+          creds[:refresh_token] = @refresh_token
+        end
+
+        if @id_token_raw
+          creds[:id_token] = @id_token_raw
+        end
+
+        creds
+      end
+
+      # Authorization phase - build authorization URL and redirect
+      def request_phase
+        # Store state and nonce in session for security
+        store_state if configuration.require_state?
+        store_nonce if configuration.send_nonce?
+        store_pkce_verifier if configuration.pkce?
+
+        # Build authorization URL
+        authorization_url = build_authorization_url
+
+        # Redirect to authorization endpoint
+        redirect(authorization_url)
+      end
+
+      # Callback phase - handle authorization response
+      def callback_phase
+        validate_callback_params!
+
+        case configuration.response_type
+        when "code"
+          handle_authorization_code_flow
+        when "id_token"
+          handle_implicit_flow
+        else
+          fail!(:unsupported_response_type, "Unsupported response type: #{configuration.response_type}")
+        end
+
+        super
+      rescue OmniauthOidc::Errors::ConfigurationError => e
+        fail!(:configuration_error, e)
+      rescue OmniauthOidc::Errors::TokenError => e
+        fail!(:token_error, e)
+      rescue OmniauthOidc::Errors::VerificationError => e
+        fail!(:verification_error, e)
+      rescue StandardError => e
+        fail!(:unknown_error, e)
+      end
+
+      # Handle logout requests
       def other_phase
-        if logout_path_pattern.match?(request.url)
-          options.issuer = issuer if options.issuer.to_s.empty?
-
-          return redirect(end_session_uri) if end_session_uri
+        if logout_request?
+          redirect_to_logout
+        else
+          call_app!
         end
-        call_app!
-      end
-
-      # URL to end authenticated user's session with OIDC provider
-      def end_session_uri
-        return unless end_session_endpoint_is_valid?
-
-        end_session_uri = URI(client_options.end_session_endpoint)
-        end_session_uri.query = encoded_post_logout_redirect_uri
-        end_session_uri.to_s
       end
 
       private
 
-      def issuer
-        @issuer ||= config.issuer
+      # Service object accessors
+      def configuration
+        @configuration ||= Configuration.new(options, request)
       end
 
-      def host
-        @host ||= URI.parse(config.issuer).host
+      def discovery_service
+        @discovery_service ||= Discovery.new(configuration)
       end
 
-      # get scope list from options or provider config defaults
-      def scope
-        options.scope || config.scopes_supported
+      # Authorization flow implementation
+      def build_authorization_url
+        uri = URI(discovery_service.authorization_endpoint)
+        uri.query = URI.encode_www_form(authorization_params)
+        uri.to_s
       end
 
-      def authorization_code
-        params["code"]
+      def authorization_params
+        params = {
+          response_type: configuration.response_type,
+          scope: configuration.scope,
+          client_id: configuration.client_id,
+          redirect_uri: redirect_uri
+        }
+
+        # Add state for CSRF protection
+        params[:state] = session["omniauth.state"] if configuration.require_state?
+
+        # Add nonce for ID token security
+        params[:nonce] = session["omniauth.nonce"] if configuration.send_nonce?
+
+        # Add PKCE parameters if enabled
+        if configuration.pkce?
+          params[:code_challenge] = pkce_code_challenge
+          params[:code_challenge_method] = configuration.pkce_options[:code_challenge_method]
+        end
+
+        # Add optional parameters
+        params[:response_mode] = configuration.response_mode if configuration.response_mode
+        params[:display] = configuration.display if configuration.display
+        params[:prompt] = configuration.prompt if configuration.prompt
+        params[:max_age] = configuration.max_age if configuration.max_age
+        params[:ui_locales] = configuration.ui_locales if configuration.ui_locales
+        params[:hd] = configuration.hd if configuration.hd
+
+        # Add extra parameters from configuration
+        params.merge!(configuration.extra_authorize_params)
+
+        params.compact
       end
 
-      def client_options
-        options.client_options
+      def handle_authorization_code_flow
+        # Exchange authorization code for tokens
+        exchange_code_for_tokens
+
+        # Fetch user info if enabled
+        fetch_user_info if configuration.fetch_user_info?
+
+        # Build final auth hash
+        build_auth_hash
       end
 
-      def stored_state
-        session.delete("omniauth.state")
+      def handle_implicit_flow
+        # For implicit flow, we get the ID token directly
+        @id_token_raw = request.params["id_token"]
+        # TODO: Verify ID token signature and claims
+        # For now, just decode without verification (not recommended for production)
+        @id_token_data = JSON::JWT.decode(@id_token_raw, :skip_verification) if @id_token_raw
+
+        build_auth_hash
       end
 
-      def new_nonce
-        session["omniauth.nonce"] = SecureRandom.hex(16)
+      def exchange_code_for_tokens
+        token_params = {
+          grant_type: 'authorization_code',
+          code: request.params["code"],
+          redirect_uri: redirect_uri,
+          client_id: configuration.client_id
+        }
+
+        # Add client secret for authentication
+        if configuration.client_secret
+          token_params[:client_secret] = configuration.client_secret
+        end
+
+        # Add PKCE verifier if used
+        if configuration.pkce?
+          token_params[:code_verifier] = session.delete("omniauth.pkce.verifier")
+        end
+
+        # Add scope if required
+        if configuration.send_scope_to_token_endpoint?
+          token_params[:scope] = configuration.scope
+        end
+
+        headers = {
+          'Content-Type' => 'application/x-www-form-urlencoded',
+          'Accept' => 'application/json'
+        }
+
+        # Make token request
+        token_response = Http::Client.post(
+          discovery_service.token_endpoint,
+          body: URI.encode_www_form(token_params),
+          headers: headers
+        )
+
+        # Extract tokens from response
+        @access_token = token_response['access_token']
+        @refresh_token = token_response['refresh_token']
+        @id_token_raw = token_response['id_token']
+
+        # Decode ID token if present (TODO: add proper verification)
+        if @id_token_raw
+          @id_token_data = JSON::JWT.decode(@id_token_raw, :skip_verification)
+        end
       end
 
-      def script_name
-        return "" if @env.nil?
+      def fetch_user_info
+        return unless @access_token && discovery_service.userinfo_endpoint
 
-        super
-      end
+        headers = {
+          'Authorization' => "Bearer #{@access_token}",
+          'Accept' => 'application/json'
+        }
 
-      def session
-        return {} if @env.nil?
-
-        super
-      end
-
-      def redirect_uri
-        options.redirect_uri || full_host + callback_path
-      end
-
-      def encoded_post_logout_redirect_uri
-        return unless options.post_logout_redirect_uri
-
-        URI.encode_www_form(
-          post_logout_redirect_uri: options.post_logout_redirect_uri
+        @user_info_data = Http::Client.get(
+          discovery_service.userinfo_endpoint,
+          headers: headers
         )
       end
 
-      def end_session_endpoint_is_valid?
-        client_options.end_session_endpoint &&
-          client_options.end_session_endpoint =~ URI::DEFAULT_PARSER.make_regexp
+      def build_auth_hash
+        env["omniauth.auth"] = OmniAuth::AuthHash.new({
+          provider: name,
+          uid: uid,
+          info: info,
+          extra: extra,
+          credentials: credentials
+        })
+      end
+
+      # Validation methods
+      def validate_callback_params!
+        validate_state! if configuration.require_state?
+        validate_error_params!
+        validate_response_type!
+      end
+
+      def validate_state!
+        stored_state = session.delete("omniauth.state")
+        current_state = request.params["state"]
+
+        return if stored_state == current_state
+
+        raise OmniauthOidc::Errors::VerificationError, "Invalid state parameter"
+      end
+
+      def validate_error_params!
+        return unless request.params["error"]
+
+        error_description = request.params["error_description"] || request.params["error_reason"]
+        raise OmniauthOidc::Errors::TokenError, "#{request.params['error']}: #{error_description}"
+      end
+
+      def validate_response_type!
+        return if request.params.key?(configuration.response_type)
+
+        error_info = RESPONSE_TYPE_EXCEPTIONS[configuration.response_type]
+        fail!(error_info[:key], error_info[:exception_class].new(request.params["error"]))
+      end
+
+      # Session management
+      def store_state
+        state_value = configuration.state || SecureRandom.hex(32)
+        session["omniauth.state"] = state_value
+      end
+
+      def store_nonce
+        nonce_value = SecureRandom.hex(16)
+        session["omniauth.nonce"] = nonce_value
+      end
+
+      def store_pkce_verifier
+        verifier = configuration.pkce_verifier || SecureRandom.urlsafe_base64(32)
+        session["omniauth.pkce.verifier"] = verifier
+      end
+
+      def pkce_code_challenge
+        verifier = session["omniauth.pkce.verifier"]
+        return nil unless verifier
+
+        configuration.pkce_options[:code_challenge].call(verifier)
+      end
+
+      # Utility methods
+      def redirect_uri
+        options.redirect_uri || "#{full_host}#{callback_path}"
+      end
+
+      def logout_request?
+        logout_path_pattern.match?(request.url)
+      end
+
+      def redirect_to_logout
+        return call_app! unless end_session_uri
+
+        redirect(end_session_uri)
+      end
+
+      def end_session_uri
+        return unless discovery_service.end_session_endpoint
+
+        uri = URI(discovery_service.end_session_endpoint)
+        uri.query = URI.encode_www_form(post_logout_redirect_uri: configuration.post_logout_redirect_uri) if configuration.post_logout_redirect_uri
+        uri.to_s
       end
 
       def logout_path_pattern
-        @logout_path_pattern ||= /\A#{Regexp.quote(request.base_url)}#{options.logout_path}/
+        @logout_path_pattern ||= /\A#{Regexp.quote(request.base_url)}#{configuration.logout_path}/
       end
 
-      # Performance logging helpers
-      def log_info(message)
-        logger.info(message) if logger
-      end
-
-      def log_error(message)
-        logger.error(message) if logger
-      end
-
-      def logger
-        @logger ||= defined?(Rails) ? Rails.logger : Logger.new(STDOUT)
-      end
-
-      # Override for the CallbackError class
+      # Legacy error class for backward compatibility
       class CallbackError < StandardError
         attr_accessor :error, :error_reason, :error_uri
 
@@ -224,7 +436,7 @@ module OmniAuth
         end
 
         def message
-          [ error, error_reason, error_uri ].compact.join(" | ")
+          [error, error_reason, error_uri].compact.join(" | ")
         end
       end
     end
