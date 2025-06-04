@@ -17,4 +17,6 @@ group :development, :test do
   gem "rubocop"
   gem "rubocop-rails-omakase", require: false, group: [ :development ]
   gem "webmock"
+  gem "rack"
+  gem "rack-test"
 end
