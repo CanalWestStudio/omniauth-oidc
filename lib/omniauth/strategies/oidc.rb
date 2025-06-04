@@ -84,10 +84,12 @@ module OmniAuth
       # Public API methods
       def uid
         # Get UID from userinfo or ID token
-        if @user_info_data && @user_info_data[configuration.uid_field]
-          @user_info_data[configuration.uid_field]
-        elsif @id_token_data && @id_token_data[configuration.uid_field]
-          @id_token_data[configuration.uid_field]
+        uid_field = configuration.uid_field
+
+        if @user_info_data && (@user_info_data[uid_field] || @user_info_data[uid_field.to_s])
+          @user_info_data[uid_field] || @user_info_data[uid_field.to_s]
+        elsif @id_token_data && (@id_token_data[uid_field] || @id_token_data[uid_field.to_s])
+          @id_token_data[uid_field] || @id_token_data[uid_field.to_s]
         else
           "unknown"
         end
@@ -101,10 +103,10 @@ module OmniAuth
 
         user_info[:name] = source_data['name']
         user_info[:email] = source_data['email']
-        user_info[:email_verified] = source_data['email_verified']
-        user_info[:first_name] = source_data['given_name']
-        user_info[:last_name] = source_data['family_name']
-        user_info[:phone] = source_data['phone_number']
+        user_info[:email_verified] = source_data['emailVerified'] || source_data['email_verified'] # Support both formats
+        user_info[:first_name] = source_data['givenName'] || source_data['given_name'] # Support both formats
+        user_info[:last_name] = source_data['familyName'] || source_data['family_name'] # Support both formats
+        user_info[:phone] = source_data['phoneNumber'] || source_data['phone_number'] # Support both formats
         user_info[:picture] = source_data['picture']
         user_info[:locale] = source_data['locale']
 
