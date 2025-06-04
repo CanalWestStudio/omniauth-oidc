@@ -82,54 +82,23 @@ module OmniAuth
 
       # Public API methods
       def uid
-        # Get UID from userinfo or ID token
         uid_field = configuration.uid_field
-
-        if @user_info_data && (@user_info_data[uid_field] || @user_info_data[uid_field.to_s])
-          @user_info_data[uid_field] || @user_info_data[uid_field.to_s]
-        elsif @id_token_data && (@id_token_data[uid_field] || @id_token_data[uid_field.to_s])
-          @id_token_data[uid_field] || @id_token_data[uid_field.to_s]
-        else
-          "unknown"
-        end
+        get_user_attribute(uid_field) || "unknown"
       end
 
       info do
-        # Build user info from available data
-        user_info = {}
-
         source_data = @user_info_data || @id_token_data || {}
 
-        user_info[:name] = source_data['name']
-        user_info[:email] = source_data['email']
-
-        # Debug emailVerified processing
-        email_verified = source_data['emailVerified'] || source_data['email_verified']
-        if logger
-          logger.debug("[OIDC DEBUG] emailVerified processing:")
-          logger.debug("  emailVerified (camelCase): #{source_data['emailVerified'].inspect} (#{source_data['emailVerified'].class})")
-          logger.debug("  email_verified (snake_case): #{source_data['email_verified'].inspect} (#{source_data['email_verified'].class})")
-          logger.debug("  final value: #{email_verified.inspect} (#{email_verified.class})")
-        end
-
-        # Safely convert emailVerified to boolean to handle various data types
-        user_info[:email_verified] = case email_verified
-                                     when true, 'true', 1, '1'
-                                       true
-                                     when false, 'false', 0, '0', nil
-                                       false
-                                     else
-                                       # For any other value, convert to boolean based on presence
-                                       !email_verified.nil? && !email_verified.to_s.empty?
-                                     end
-
-        user_info[:first_name] = source_data['givenName'] || source_data['given_name'] # Support both formats
-        user_info[:last_name] = source_data['familyName'] || source_data['family_name'] # Support both formats
-        user_info[:phone] = source_data['phoneNumber'] || source_data['phone_number'] # Support both formats
-        user_info[:picture] = source_data['picture']
-        user_info[:locale] = source_data['locale']
-
-        user_info.compact
+        {
+          name: source_data['name'],
+          email: source_data['email'],
+          email_verified: normalize_email_verified(source_data),
+          first_name: get_name_field(source_data, 'givenName', 'given_name'),
+          last_name: get_name_field(source_data, 'familyName', 'family_name'),
+          phone: get_name_field(source_data, 'phoneNumber', 'phone_number'),
+          picture: source_data['picture'],
+          locale: source_data['locale']
+        }.compact
       end
 
       extra do
@@ -141,15 +110,9 @@ module OmniAuth
         # Include ID token claims if available
         extra_data[:id_token] = @id_token_data if @id_token_data
 
-        # For Intuit integration - include realmId if present
-        if @id_token_data && @id_token_data['realmId']
-          extra_data[:realmId] = @id_token_data['realmId']
-        end
-
-        # Also check for realmId in request params (Intuit sends it as a parameter)
-        if request.params['realmId']
-          extra_data[:realmId] = request.params['realmId']
-        end
+        # Include realmId for Intuit integration
+        realm_id = find_realm_id
+        extra_data[:realmId] = realm_id if realm_id
 
         extra_data
       end
@@ -162,29 +125,16 @@ module OmniAuth
           creds[:expires_at] = Time.now.to_i + 3600 # Default 1 hour if not specified
         end
 
-        if @refresh_token
-          creds[:refresh_token] = @refresh_token
-        end
-
-        if @id_token_raw
-          creds[:id_token] = @id_token_raw
-        end
+        creds[:refresh_token] = @refresh_token if @refresh_token
+        creds[:id_token] = @id_token_raw if @id_token_raw
 
         creds
       end
 
       # Authorization phase - build authorization URL and redirect
       def request_phase
-        # Store state and nonce in session for security
-        store_state if configuration.require_state?
-        store_nonce if configuration.send_nonce?
-        store_pkce_verifier if configuration.pkce?
-
-        # Build authorization URL
-        authorization_url = build_authorization_url
-
-        # Redirect to authorization endpoint
-        redirect(authorization_url)
+        setup_security_parameters
+        redirect(build_authorization_url)
       end
 
       # Callback phase - handle authorization response
@@ -231,6 +181,47 @@ module OmniAuth
         @discovery_service ||= Discovery.new(configuration)
       end
 
+      # Helper methods for data extraction
+      def get_user_attribute(field)
+        [@user_info_data, @id_token_data].compact.each do |data|
+          value = data[field] || data[field.to_s]
+          return value if value
+        end
+        nil
+      end
+
+      def get_name_field(data, camel_case, snake_case)
+        data[camel_case] || data[snake_case]
+      end
+
+      def normalize_email_verified(source_data)
+        email_verified = source_data['emailVerified'] || source_data['email_verified']
+
+        case email_verified
+        when true, 'true', 1, '1'
+          true
+        when false, 'false', 0, '0'
+          false
+        when nil
+          nil  # Keep as nil for compliance - don't assume verification status
+        else
+          # For any other value, convert to boolean based on presence
+          !email_verified.nil? && !email_verified.to_s.empty?
+        end
+      end
+
+      def find_realm_id
+        # Check ID token first, then request params (Intuit sends it as a parameter)
+        (@id_token_data && @id_token_data['realmId']) || request.params['realmId']
+      end
+
+      # Security setup
+      def setup_security_parameters
+        store_state if configuration.require_state?
+        store_nonce if configuration.send_nonce?
+        store_pkce_verifier if configuration.pkce?
+      end
+
       # Authorization flow implementation
       def build_authorization_url
         uri = URI(discovery_service.authorization_endpoint)
@@ -239,117 +230,116 @@ module OmniAuth
       end
 
       def authorization_params
-        params = {
+        params = base_authorization_params
+        add_security_params(params)
+        add_optional_params(params)
+        params.merge!(configuration.extra_authorize_params)
+        params.compact
+      end
+
+      def base_authorization_params
+        {
           response_type: configuration.response_type,
           scope: configuration.scope,
           client_id: configuration.client_id,
           redirect_uri: redirect_uri
         }
+      end
 
-        # Add state for CSRF protection
+      def add_security_params(params)
         params[:state] = session["omniauth.state"] if configuration.require_state?
-
-        # Add nonce for ID token security
         params[:nonce] = session["omniauth.nonce"] if configuration.send_nonce?
 
-        # Add PKCE parameters if enabled
         if configuration.pkce?
           params[:code_challenge] = pkce_code_challenge
           params[:code_challenge_method] = configuration.pkce_options[:code_challenge_method]
         end
+      end
 
-        # Add optional parameters
-        params[:response_mode] = configuration.response_mode if configuration.response_mode
-        params[:display] = configuration.display if configuration.display
-        params[:prompt] = configuration.prompt if configuration.prompt
-        params[:max_age] = configuration.max_age if configuration.max_age
-        params[:ui_locales] = configuration.ui_locales if configuration.ui_locales
-        params[:hd] = configuration.hd if configuration.hd
+      def add_optional_params(params)
+        optional_mappings = {
+          response_mode: :response_mode,
+          display: :display,
+          prompt: :prompt,
+          max_age: :max_age,
+          ui_locales: :ui_locales,
+          hd: :hd
+        }
 
-        # Add extra parameters from configuration
-        params.merge!(configuration.extra_authorize_params)
-
-        params.compact
+        optional_mappings.each do |param, config_method|
+          value = configuration.send(config_method)
+          params[param] = value if value
+        end
       end
 
       def handle_authorization_code_flow
-        # Exchange authorization code for tokens
         exchange_code_for_tokens
-
-        # Fetch user info if enabled
-        fetch_user_info if configuration.fetch_user_info?
-
-        # Build final auth hash
+        fetch_user_info if should_fetch_user_info?
         build_auth_hash
       end
 
       def handle_implicit_flow
-        # For implicit flow, we get the ID token directly
         @id_token_raw = request.params["id_token"]
-        # TODO: Verify ID token signature and claims
-        # For now, just decode without verification (not recommended for production)
-        @id_token_data = JSON::JWT.decode(@id_token_raw, :skip_verification) if @id_token_raw
-
+        @id_token_data = decode_id_token(@id_token_raw) if @id_token_raw
         build_auth_hash
       end
 
       def exchange_code_for_tokens
-        token_params = {
+        token_params = build_token_params
+        headers = {
+          'Content-Type' => 'application/x-www-form-urlencoded',
+          'Accept' => 'application/json'
+        }
+
+        log_timing("Token exchange") do
+          token_response = Http::Client.post(
+            discovery_service.token_endpoint,
+            body: URI.encode_www_form(token_params),
+            headers: headers,
+            timeout: 3
+          )
+
+          extract_tokens(token_response)
+        end
+      end
+
+      def build_token_params
+        params = {
           grant_type: 'authorization_code',
           code: request.params["code"],
           redirect_uri: redirect_uri,
           client_id: configuration.client_id
         }
 
-        # Add client secret for authentication
-        if configuration.client_secret
-          token_params[:client_secret] = configuration.client_secret
-        end
+        params[:client_secret] = configuration.client_secret if configuration.client_secret
+        params[:code_verifier] = session.delete("omniauth.pkce.verifier") if configuration.pkce?
+        params[:scope] = configuration.scope if configuration.send_scope_to_token_endpoint?
 
-        # Add PKCE verifier if used
-        if configuration.pkce?
-          token_params[:code_verifier] = session.delete("omniauth.pkce.verifier")
-        end
+        params
+      end
 
-        # Add scope if required
-        if configuration.send_scope_to_token_endpoint?
-          token_params[:scope] = configuration.scope
-        end
+      def extract_tokens(token_response)
+        @access_token = token_response['access_token']
+        @refresh_token = token_response['refresh_token']
+        @id_token_raw = token_response['id_token']
+        @id_token_data = decode_id_token(@id_token_raw) if @id_token_raw
+      end
 
-        headers = {
-          'Content-Type' => 'application/x-www-form-urlencoded',
-          'Accept' => 'application/json'
-        }
+      def decode_id_token(token)
+        # Note: In production, proper signature verification should be implemented
+        JSON::JWT.decode(token, :skip_verification)
+      end
 
-        # Make token request with aggressive timeout
-        log_timing("Token exchange") do
-          token_response = Http::Client.post(
-            discovery_service.token_endpoint,
-            body: URI.encode_www_form(token_params),
-            headers: headers,
-            timeout: 3  # Reduced from 5s to 3s for faster failure
-          )
-
-          # Extract tokens from response
-          @access_token = token_response['access_token']
-          @refresh_token = token_response['refresh_token']
-          @id_token_raw = token_response['id_token']
-
-          # Decode ID token if present (TODO: add proper verification)
-          if @id_token_raw
-            @id_token_data = JSON::JWT.decode(@id_token_raw, :skip_verification)
-          end
-        end
+      def should_fetch_user_info?
+        return false unless configuration.fetch_user_info?
+        return true if needs_userinfo_for_compliance?
+        !has_sufficient_id_token_data?
       end
 
       def fetch_user_info
         return unless @access_token && discovery_service.userinfo_endpoint
 
-        # Skip userinfo if ID token already has sufficient user data
-        if should_skip_userinfo?
-          log_info("[OIDC] Skipping userinfo fetch - ID token has sufficient data")
-          return
-        end
+        log_user_info_decision
 
         headers = {
           'Authorization' => "Bearer #{@access_token}",
@@ -360,8 +350,18 @@ module OmniAuth
           @user_info_data = Http::Client.get(
             discovery_service.userinfo_endpoint,
             headers: headers,
-            timeout: 3  # Reduced from 5s to 3s for faster failure
+            timeout: 3
           )
+        end
+      end
+
+      def log_user_info_decision
+        if needs_userinfo_for_compliance?
+          log_info("[OIDC] Fetching userinfo for compliance fields (emailVerified)")
+        elsif !has_sufficient_id_token_data?
+          log_info("[OIDC] Fetching userinfo for additional user data")
+        else
+          log_info("[OIDC] Skipping userinfo fetch - ID token has sufficient data")
         end
       end
 
@@ -428,11 +428,29 @@ module OmniAuth
         configuration.pkce_options[:code_challenge].call(verifier)
       end
 
-      # Utility methods
-      def redirect_uri
-        options.redirect_uri || "#{full_host}#{callback_path}"
+      # Smart UserInfo logic
+      def has_sufficient_id_token_data?
+        return false unless @id_token_data
+
+        # Check if ID token has the essential fields we need
+        essential_fields = ['sub']
+        useful_fields = ['email', 'givenName', 'given_name', 'name', 'familyName', 'family_name']
+
+        has_essential = essential_fields.all? { |field| @id_token_data[field] }
+        has_useful_data = useful_fields.any? { |field| @id_token_data[field] }
+
+        has_essential && has_useful_data
       end
 
+      def needs_userinfo_for_compliance?
+        return false unless @id_token_data
+
+        # Check if critical compliance fields are missing from ID token
+        critical_fields = ['emailVerified', 'email_verified']
+        critical_fields.none? { |field| @id_token_data.key?(field) }
+      end
+
+      # Logout functionality
       def logout_request?
         logout_path_pattern.match?(request.url)
       end
@@ -447,7 +465,9 @@ module OmniAuth
         return unless discovery_service.end_session_endpoint
 
         uri = URI(discovery_service.end_session_endpoint)
-        uri.query = URI.encode_www_form(post_logout_redirect_uri: configuration.post_logout_redirect_uri) if configuration.post_logout_redirect_uri
+        if configuration.post_logout_redirect_uri
+          uri.query = URI.encode_www_form(post_logout_redirect_uri: configuration.post_logout_redirect_uri)
+        end
         uri.to_s
       end
 
@@ -455,21 +475,9 @@ module OmniAuth
         @logout_path_pattern ||= /\A#{Regexp.quote(request.base_url)}#{configuration.logout_path}/
       end
 
-      def should_skip_userinfo?
-        # Skip if we have an ID token with comprehensive user data
-        return false unless @id_token_data
-
-        # Check if ID token has the essential fields we need for the info hash
-        essential_fields = ['sub']  # sub is always required
-
-        # Check for common user info fields that might be in ID token
-        useful_fields = ['email', 'givenName', 'given_name', 'name', 'familyName', 'family_name']
-
-        # Skip userinfo if we have sub and at least one useful field
-        has_essential = essential_fields.all? { |field| @id_token_data[field] }
-        has_useful_data = useful_fields.any? { |field| @id_token_data[field] }
-
-        has_essential && has_useful_data
+      # Utility methods
+      def redirect_uri
+        options.redirect_uri || "#{full_host}#{callback_path}"
       end
 
       def log_timing(description)
