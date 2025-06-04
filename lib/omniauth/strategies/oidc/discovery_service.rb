@@ -1,4 +1,4 @@
-require_relative 'http_client'
+require_relative 'http/client'
 
 module OmniAuth
   module Strategies
@@ -12,13 +12,10 @@ module OmniAuth
           def fetch_configuration(endpoint_url)
             return nil unless endpoint_url
 
-            cache_key = "oidc_discovery:#{endpoint_url}"
-
             log_timing("Discovery document fetch") do
-              config_data = HttpClient.get(
+              config_data = Http::Client.get(
                 endpoint_url,
-                timeout: FALLBACK_TIMEOUT,
-                cache_key: cache_key
+                timeout: FALLBACK_TIMEOUT
               )
 
               if config_data.is_a?(Hash)
@@ -36,13 +33,10 @@ module OmniAuth
           def fetch_jwks(jwks_uri)
             return nil unless jwks_uri
 
-            cache_key = "oidc_jwks:#{jwks_uri}"
-
             log_timing("JWKS fetch") do
-              HttpClient.get(
+              Http::Client.get(
                 jwks_uri,
-                timeout: FALLBACK_TIMEOUT,
-                cache_key: cache_key
+                timeout: FALLBACK_TIMEOUT
               )
             end
           rescue => e

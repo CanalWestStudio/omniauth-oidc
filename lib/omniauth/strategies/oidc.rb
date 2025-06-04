@@ -8,7 +8,6 @@ require "omniauth"
 require "openid_connect"
 require "openid_config_parser"
 require "forwardable"
-require "httparty"
 require "securerandom"
 
 # Require core service objects and components we've built
@@ -302,36 +301,48 @@ module OmniAuth
           'Accept' => 'application/json'
         }
 
-        # Make token request
-        token_response = Http::Client.post(
-          discovery_service.token_endpoint,
-          body: URI.encode_www_form(token_params),
-          headers: headers
-        )
+        # Make token request with aggressive timeout
+        log_timing("Token exchange") do
+          token_response = Http::Client.post(
+            discovery_service.token_endpoint,
+            body: URI.encode_www_form(token_params),
+            headers: headers,
+            timeout: 3  # Reduced from 5s to 3s for faster failure
+          )
 
-        # Extract tokens from response
-        @access_token = token_response['access_token']
-        @refresh_token = token_response['refresh_token']
-        @id_token_raw = token_response['id_token']
+          # Extract tokens from response
+          @access_token = token_response['access_token']
+          @refresh_token = token_response['refresh_token']
+          @id_token_raw = token_response['id_token']
 
-        # Decode ID token if present (TODO: add proper verification)
-        if @id_token_raw
-          @id_token_data = JSON::JWT.decode(@id_token_raw, :skip_verification)
+          # Decode ID token if present (TODO: add proper verification)
+          if @id_token_raw
+            @id_token_data = JSON::JWT.decode(@id_token_raw, :skip_verification)
+          end
         end
       end
 
       def fetch_user_info
         return unless @access_token && discovery_service.userinfo_endpoint
 
+        # Skip userinfo if ID token already has sufficient user data
+        if should_skip_userinfo?
+          log_info("[OIDC] Skipping userinfo fetch - ID token has sufficient data")
+          return
+        end
+
         headers = {
           'Authorization' => "Bearer #{@access_token}",
           'Accept' => 'application/json'
         }
 
-        @user_info_data = Http::Client.get(
-          discovery_service.userinfo_endpoint,
-          headers: headers
-        )
+        log_timing("UserInfo fetch") do
+          @user_info_data = Http::Client.get(
+            discovery_service.userinfo_endpoint,
+            headers: headers,
+            timeout: 3  # Reduced from 5s to 3s for faster failure
+          )
+        end
       end
 
       def build_auth_hash
@@ -422,6 +433,47 @@ module OmniAuth
 
       def logout_path_pattern
         @logout_path_pattern ||= /\A#{Regexp.quote(request.base_url)}#{configuration.logout_path}/
+      end
+
+      def should_skip_userinfo?
+        # Skip if we have an ID token with comprehensive user data
+        return false unless @id_token_data
+
+        # Check if ID token has the essential fields we need for the info hash
+        essential_fields = ['sub']  # sub is always required
+
+        # Check for common user info fields that might be in ID token
+        useful_fields = ['email', 'givenName', 'given_name', 'name', 'familyName', 'family_name']
+
+        # Skip userinfo if we have sub and at least one useful field
+        has_essential = essential_fields.all? { |field| @id_token_data[field] }
+        has_useful_data = useful_fields.any? { |field| @id_token_data[field] }
+
+        has_essential && has_useful_data
+      end
+
+      def log_timing(description)
+        return yield unless logger
+
+        start_time = Time.now
+        result = yield
+        elapsed_time = ((Time.now - start_time) * 1000).round(2)
+        log_info("[OIDC] #{description} completed in #{elapsed_time}ms")
+        result
+      end
+
+      def log_info(message)
+        logger&.info(message)
+      end
+
+      def logger
+        @logger ||= begin
+          if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
+            Rails.logger
+          elsif defined?(Logger)
+            Logger.new($stdout)
+          end
+        end
       end
 
       # Legacy error class for backward compatibility

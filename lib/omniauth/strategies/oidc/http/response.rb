@@ -57,6 +57,8 @@ module OmniAuth
             case @raw_response
             when Net::HTTPResponse
               @raw_response.code.to_i
+            when Faraday::Response
+              @raw_response.status
             when Hash
               @raw_response[:status] || @raw_response['status'] || 200
             else
@@ -67,6 +69,8 @@ module OmniAuth
           def extract_body
             case @raw_response
             when Net::HTTPResponse
+              @raw_response.body
+            when Faraday::Response
               @raw_response.body
             when Hash
               @raw_response.to_json
@@ -81,6 +85,8 @@ module OmniAuth
             case @raw_response
             when Net::HTTPResponse
               @raw_response.to_hash
+            when Faraday::Response
+              @raw_response.headers.to_h
             when Hash
               @raw_response[:headers] || {}
             else
@@ -89,11 +95,23 @@ module OmniAuth
           end
 
           def content_type
-            headers['content-type']&.first || headers['Content-Type']&.first
+            case headers
+            when Hash
+              headers['content-type'] || headers['Content-Type']
+            when Array
+              headers['content-type']&.first || headers['Content-Type']&.first
+            else
+              nil
+            end
           end
 
           def parse_response_body
             return nil if body.nil? || body.empty?
+
+            # Faraday may have already parsed JSON responses
+            if @raw_response.is_a?(Faraday::Response) && body.is_a?(Hash)
+              return body
+            end
 
             if json?
               JSON.parse(body)
