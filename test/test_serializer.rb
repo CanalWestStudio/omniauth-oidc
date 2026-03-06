@@ -13,7 +13,7 @@ class TestSerializer < Minitest::Test
     strategy = build_app(
       response_type: "code",
       response_mode: :query,
-      scope: [:openid, :email],
+      scope: [ :openid, :email ],
       send_nonce: true,
       prompt: :login,
       hd: "example.com",

@@ -7,7 +7,7 @@ class TestCallback < Minitest::Test
 
   def setup
     @key, @jwk = generate_rsa_keypair
-    @jwk_set = { keys: [@jwk] }
+    @jwk_set = { keys: [ @jwk ] }
     @nonce = "test-nonce"
     @id_token = generate_id_token(standard_id_token_claims(nonce: @nonce), @key)
     OmniAuth::Strategies::Oidc::Transport.reset!

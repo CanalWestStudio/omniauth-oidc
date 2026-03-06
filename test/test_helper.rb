@@ -19,7 +19,7 @@ require "openssl"
 # Silence OmniAuth logger during tests
 OmniAuth.config.logger = Logger.new("/dev/null")
 # Allow GET requests in tests to simplify test setup
-OmniAuth.config.allowed_request_methods = [:post, :get]
+OmniAuth.config.allowed_request_methods = [ :post, :get ]
 OmniAuth.config.silence_get_warning = true
 # Disable CSRF protection in tests
 OmniAuth.config.request_validation_phase = nil
@@ -42,7 +42,7 @@ module OidcTestHelper
     merged = deep_merge(default_opts, strategy_opts)
 
     app = lambda { |env|
-      [200, { "Content-Type" => "text/plain" }, ["OK"]]
+      [ 200, { "Content-Type" => "text/plain" }, [ "OK" ] ]
     }
 
     OmniAuth::Strategies::Oidc.new(app, merged)
@@ -69,7 +69,7 @@ module OidcTestHelper
       userinfo_endpoint: "#{ISSUER}/userinfo",
       jwks_uri: "#{ISSUER}/jwks",
       end_session_endpoint: "#{ISSUER}/logout",
-      scopes_supported: ["openid", "email", "profile"]
+      scopes_supported: [ "openid", "email", "profile" ]
     }.merge(overrides)
   end
 
@@ -126,7 +126,7 @@ module OidcTestHelper
   def generate_rsa_keypair
     key = OpenSSL::PKey::RSA.generate(2048)
     jwk = JSON::JWK.new(key, kid: "test-key-1")
-    [key, jwk]
+    [ key, jwk ]
   end
 
   def generate_id_token(claims, key, algorithm: :RS256, kid: "test-key-1")

@@ -7,7 +7,7 @@ class TestVerify < Minitest::Test
 
   def setup
     @key, @jwk = generate_rsa_keypair
-    @jwk_set = { keys: [@jwk] }
+    @jwk_set = { keys: [ @jwk ] }
     OmniAuth::Strategies::Oidc::Transport.reset!
   end
 

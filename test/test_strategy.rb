@@ -12,7 +12,7 @@ class TestStrategy < Minitest::Test
 
   def test_default_scope_is_openid
     strategy = build_app
-    assert_equal [:openid], strategy.options.scope
+    assert_equal [ :openid ], strategy.options.scope
   end
 
   def test_default_response_type_is_code

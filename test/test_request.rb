@@ -11,7 +11,7 @@ class TestRequest < Minitest::Test
   end
 
   def test_authorize_uri_includes_required_params
-    strategy = build_app(scope: [:openid, :email])
+    strategy = build_app(scope: [ :openid, :email ])
     location = run_request_phase(strategy)
 
     uri = URI.parse(location)
@@ -60,7 +60,7 @@ class TestRequest < Minitest::Test
   end
 
   def test_authorize_uri_includes_allowed_dynamic_params
-    strategy = build_app(allow_authorize_params: [:login_hint])
+    strategy = build_app(allow_authorize_params: [ :login_hint ])
     location = run_request_phase(strategy, params: { "login_hint" => "user@example.com" })
 
     query_params = parse_redirect_params(location)
@@ -146,7 +146,7 @@ class TestRequest < Minitest::Test
     env = Rack::MockRequest.env_for("http://example.com/auth/test_oidc", "REQUEST_METHOD" => "POST")
     env["rack.session"] = session
     response = strategy.call(env)
-    [response[1]["Location"], response[1]]
+    [ response[1]["Location"], response[1] ]
   end
 
   def parse_redirect_params(location)
