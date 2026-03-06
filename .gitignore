@@ -21,3 +21,4 @@ test/version_tmp
 .ruby-gemset
 Gemfile.lock
 .tool-versions
+.DS_Store
