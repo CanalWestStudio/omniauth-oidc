@@ -289,6 +289,49 @@ Below are options for the `client_options` hash of the configuration:
 | jwks_uri               | jwks_uri on the authorization server                        |     no   | retrived from config_endpoint |
 | end_session_endpoint   | url to call to log the user out at the authorization server |     no   | `nil`                         |
 
+## Security
+
+### What the gem handles
+
+The gem provides the following security measures out of the box:
+
+- **TLS 1.2+** — All HTTP requests enforce TLS 1.2 as the minimum version, allowing TLS 1.3 negotiation
+- **CSRF/State validation** — The `state` parameter is verified on callbacks to prevent cross-site request forgery. Enabled by default via `require_state: true`
+- **Nonce verification** — Session-stored nonce is used for ID token verification, never from request params
+- **PKCE support** — Proof Key for Code Exchange (S256) is available via `pkce: true`
+- **Security headers** — All redirects include `Cache-Control: no-cache, no-store`, `Pragma: no-cache`, and `Referrer-Policy: no-referrer`
+- **RP-Initiated Logout** — Sends `id_token_hint` with end session requests per the OIDC specification
+- **No `open-uri`** — The gem does not use `open-uri`, avoiding the `Kernel.open` security risk
+
+### Host application responsibilities
+
+The following security measures must be configured in your application, as they fall outside the gem's scope:
+
+**Session and cookie security:**
+- Configure session cookies with `Secure` and `HttpOnly` flags
+- Set `SameSite=Lax` or `SameSite=Strict` on cookies
+- In Rails: `config.session_store :cookie_store, secure: true, httponly: true, same_site: :lax`
+
+**HTTPS:**
+- Enforce HTTPS on all pages
+- In Rails: `config.force_ssl = true`
+
+**Token storage:**
+- Encrypt refresh tokens at rest if persisted (e.g., AES-256)
+- Store encryption keys separately from encrypted data
+- Never log OAuth tokens or user credentials
+
+**Input handling:**
+- Sanitize any user info from the OIDC provider before rendering in views (XSS prevention)
+- Use parameterized queries when storing user data (SQL injection prevention)
+
+**HTTP methods:**
+- Disable TRACE and other unused HTTP methods on your web server
+
+### Reporting vulnerabilities
+
+If you discover a security vulnerability, please report it privately via GitHub Security Advisories rather than opening a public issue.
+
 ## Contributing
 
 Bug reports and pull requests are welcome on GitHub at https://github.com/msuliq/omniauth-oidc. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [code of conduct](https://github.com/msuliq/omniauth-oidc/blob/main/CODE_OF_CONDUCT.md).
