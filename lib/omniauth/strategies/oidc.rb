@@ -209,6 +209,23 @@ module OmniAuth
         options.redirect_uri || full_host + callback_path
       end
 
+      # Configure OIDC discovery endpoints on a target object (client_options or client).
+      # Called by both Request and Callback phases to avoid duplication.
+      def configure_discovery_endpoints(target)
+        target.host = host
+        target.authorization_endpoint = config.authorization_endpoint
+        target.token_endpoint = config.token_endpoint
+        target.userinfo_endpoint = config.userinfo_endpoint
+
+        if target.respond_to?(:jwks_uri=)
+          target.jwks_uri = config.jwks_uri
+        end
+
+        if config.end_session_endpoint && target.respond_to?(:end_session_endpoint=)
+          target.end_session_endpoint = config.end_session_endpoint
+        end
+      end
+
       def end_session_endpoint_is_valid?
         client_options.end_session_endpoint &&
           client_options.end_session_endpoint.match?(URI::RFC2396_PARSER.make_regexp)

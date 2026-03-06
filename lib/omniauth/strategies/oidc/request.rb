@@ -49,17 +49,8 @@ module OmniAuth
           session["omniauth.state"] = state || SecureRandom.hex(16)
         end
 
-        # Parse response from OIDC endpoint and set client options for request phase
-        def set_client_options_for_request_phase # rubocop:disable Metrics/AbcSize
-          client_options.host = host
-          client_options.authorization_endpoint = config.authorization_endpoint
-          client_options.token_endpoint = config.token_endpoint
-          client_options.userinfo_endpoint = config.userinfo_endpoint
-          client_options.jwks_uri = config.jwks_uri
-
-          return unless config.respond_to?(:end_session_endpoint)
-
-          client_options.end_session_endpoint = config.end_session_endpoint
+        def set_client_options_for_request_phase
+          configure_discovery_endpoints(client_options)
         end
       end
     end
