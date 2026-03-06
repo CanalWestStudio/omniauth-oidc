@@ -36,7 +36,7 @@ module OmniAuth
         end
 
         def jwks_key
-          @_jwks_key ||= Transport.request('GET', config.jwks_uri, nil, nil, false)
+          @_jwks_key ||= Transport.fetch_json(config.jwks_uri)
         end
 
         def base64_decoded_jwt_secret
@@ -49,7 +49,7 @@ module OmniAuth
           return unless id_token
           decode_id_token(id_token).verify!(issuer: config.issuer,
                                             client_id: client_options.identifier,
-                                            nonce: params["nonce"].presence || stored_nonce)
+                                            nonce: stored_nonce)
         end
 
         def decode_id_token(id_token)
@@ -86,7 +86,7 @@ module OmniAuth
           return unless client_signing_alg
           return if algorithm == client_signing_alg
 
-          reason = "Received JWT is signed with #{algorithm}, but client_singing_alg is \
+          reason = "Received JWT is signed with #{algorithm}, but client_signing_alg is \
             configured for #{client_signing_alg}"
           raise CallbackError, error: :invalid_jwt_algorithm, reason: reason, uri: params["error_uri"]
         end
@@ -138,6 +138,13 @@ module OmniAuth
           UrlSafeBase64.decode64(str).unpack1("B*").to_i(2).to_s
         end
 
+        def deep_underscore_keys(hash)
+          hash.each_with_object({}) do |(key, value), result|
+            new_key = key.to_s.gsub(/([A-Z])/, '_\1').sub(/^_/, "").downcase.to_sym
+            result[new_key] = value.is_a?(Hash) ? deep_underscore_keys(value) : value
+          end
+        end
+
         def id_token_raw_attributes
           decoded_id_token.raw_attributes
         end
@@ -149,8 +156,7 @@ module OmniAuth
             merged_user_info = access_token.userinfo!.raw_attributes.merge(id_token_raw_attributes)
 
             @user_info = ::OpenIDConnect::ResponseObject::UserInfo.new(
-              # transform keys to ensure valid UserInfo object
-              merged_user_info.deep_transform_keys(&:underscore)
+              deep_underscore_keys(merged_user_info)
             )
           else
             @user_info = access_token.userinfo!

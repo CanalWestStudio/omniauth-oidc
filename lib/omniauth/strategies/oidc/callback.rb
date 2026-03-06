@@ -47,13 +47,17 @@ module OmniAuth
 
           @access_token = client.access_token!(token_request_params)
 
-          verify_id_token!(@access_token.id_token) if configured_response_type == "code"
+          if configured_response_type == "code"
+            verify_id_token!(@access_token.id_token)
+            store_id_token(@access_token.id_token)
+          end
 
           options.fetch_user_info ? get_user_info_from_access_token : define_access_token
         end
 
         def id_token_callback_phase
-          user_data = decode_id_token(params["id_token"]).raw_attributes
+          decode_id_token(params["id_token"])
+          store_id_token(params["id_token"])
 
           define_user_info
         end
@@ -68,12 +72,6 @@ module OmniAuth
         end
 
         def get_user_info_from_access_token
-          headers = {
-            Authorization: "Bearer #{@access_token}"
-          }
-
-          Transport.request('GET', config.userinfo_endpoint, headers=headers)
-
           define_user_info
         end
 
@@ -83,6 +81,10 @@ module OmniAuth
 
         def define_access_token
           env["omniauth.auth"] = AuthHash.new(serialized_access_token_auth_hash)
+        end
+
+        def store_id_token(id_token)
+          session["omniauth.id_token"] = id_token if id_token
         end
 
         def configured_response_type
@@ -101,14 +103,26 @@ module OmniAuth
         def error_handler
           error = params["error_reason"] || params["error"]
           error_description = params["error_description"] || params["error_reason"]
-          invalid_state = (options.require_state && params["state"].to_s.empty?) || params["state"] != stored_state
 
           raise CallbackError, error: params["error"], reason: error_description, uri: params["error_uri"] if error
-          raise CallbackError, error: :csrf_detected, reason: "Invalid 'state' parameter" if invalid_state
+
+          verify_state!
 
           return unless valid_response_type?
 
           options.issuer = issuer if options.issuer.nil? || options.issuer.empty?
+        end
+
+        def verify_state!
+          session_state = stored_state
+
+          if options.require_state
+            if params["state"].to_s.empty? || params["state"] != session_state
+              raise CallbackError, error: :csrf_detected, reason: "Invalid 'state' parameter"
+            end
+          elsif !params["state"].to_s.empty? && params["state"] != session_state
+            raise CallbackError, error: :csrf_detected, reason: "Invalid 'state' parameter"
+          end
         end
       end
     end

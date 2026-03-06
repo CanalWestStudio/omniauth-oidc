@@ -2,15 +2,16 @@
 
 require "base64"
 require "timeout"
-require "net/http"
-require "open-uri"
 require "omniauth"
 require "openid_connect"
 require "openid_config_parser"
 require "forwardable"
-require "httparty"
 
-Dir[File.join(File.dirname(__FILE__), "oidc", "*.rb")].sort.each { |file| require_relative file }
+require_relative "oidc/callback"
+require_relative "oidc/request"
+require_relative "oidc/serializer"
+require_relative "oidc/transport"
+require_relative "oidc/verify"
 
 module OmniAuth
   module Strategies
@@ -81,6 +82,18 @@ module OmniAuth
 
       option :logout_path, "/logout"
 
+      SECURITY_HEADERS = {
+        "Cache-Control" => "no-cache, no-store, must-revalidate",
+        "Pragma" => "no-cache",
+        "Referrer-Policy" => "no-referrer"
+      }.freeze
+
+      def redirect(uri)
+        response = super
+        SECURITY_HEADERS.each { |k, v| response[1][k] = v }
+        response
+      end
+
       def uid
         user_info.raw_attributes[options.uid_field.to_sym] || user_info.sub
       end
@@ -120,9 +133,12 @@ module OmniAuth
       def end_session_uri
         return unless end_session_endpoint_is_valid?
 
-        end_session_uri = URI(client_options.end_session_endpoint)
-        end_session_uri.query = encoded_post_logout_redirect_uri
-        end_session_uri.to_s
+        end_session = URI(client_options.end_session_endpoint)
+        end_session_params = {}
+        end_session_params[:post_logout_redirect_uri] = options.post_logout_redirect_uri if options.post_logout_redirect_uri
+        end_session_params[:id_token_hint] = session["omniauth.id_token"] if session["omniauth.id_token"]
+        end_session.query = URI.encode_www_form(end_session_params) unless end_session_params.empty?
+        end_session.to_s
       end
 
       private
@@ -172,17 +188,9 @@ module OmniAuth
         options.redirect_uri || full_host + callback_path
       end
 
-      def encoded_post_logout_redirect_uri
-        return unless options.post_logout_redirect_uri
-
-        URI.encode_www_form(
-          post_logout_redirect_uri: options.post_logout_redirect_uri
-        )
-      end
-
       def end_session_endpoint_is_valid?
         client_options.end_session_endpoint &&
-          client_options.end_session_endpoint =~ URI::DEFAULT_PARSER.make_regexp
+          client_options.end_session_endpoint.match?(URI::RFC2396_PARSER.make_regexp)
       end
 
       def logout_path_pattern
