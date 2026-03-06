@@ -4,7 +4,6 @@ require "base64"
 require "timeout"
 require "omniauth"
 require "openid_connect"
-require "openid_config_parser"
 require "forwardable"
 
 require_relative "oidc/callback"
@@ -109,14 +108,14 @@ module OmniAuth
         @client ||= ::OpenIDConnect::Client.new(client_options)
       end
 
-      # Config is build from the json response from the OIDC config endpoint
+      # Config is built from the JSON response from the OIDC config endpoint
       def config
         unless client_options.config_endpoint || params["config_endpoint"]
           raise Error,
                 "Configuration endpoint is missing from options"
         end
 
-        @config ||= OpenidConfigParser.fetch_openid_configuration(client_options.config_endpoint)
+        @config ||= OmniauthOidc::Config.fetch(client_options.config_endpoint)
       end
 
       # Detects if current request is for the logout url and makes a redirect to end session with OIDC provider
