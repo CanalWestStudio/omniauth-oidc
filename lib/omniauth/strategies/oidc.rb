@@ -82,6 +82,28 @@ module OmniAuth
 
       option :logout_path, "/logout"
 
+      # Cross-module state contract. These methods and instance variables are
+      # shared between Callback, Verify, and Serializer modules during the
+      # callback phase:
+      #
+      # Callback provides:
+      #   access_token  — OpenIDConnect access token (lazy-initialized, memoized)
+      #   store_id_token — persists id_token to session for RP-Initiated Logout
+      #
+      # Verify provides:
+      #   user_info          — merged UserInfo from access token + id_token claims
+      #   decoded_id_token   — decoded and verified JWT (attr_reader)
+      #   verify_id_token!   — verifies id_token signature, issuer, nonce
+      #   decode_id_token    — decodes JWT, sets @decoded_id_token
+      #   secret, public_key — signing key resolution
+      #
+      # Serializer reads:
+      #   access_token, user_info, decoded_id_token (via id_token_raw_attributes)
+      #
+      # Oidc (this class) provides to all modules:
+      #   client, config, client_options, scope, session, params, options,
+      #   redirect_uri, stored_state, new_nonce, host, issuer
+
       SECURITY_HEADERS = {
         "Cache-Control" => "no-cache, no-store, must-revalidate",
         "Pragma" => "no-cache",

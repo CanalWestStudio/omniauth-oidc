@@ -14,11 +14,11 @@ module OmniAuth
 
         def serialized_credentials
           {
-            id_token: @access_token.id_token,
-            token: @access_token.access_token,
-            refresh_token: @access_token.refresh_token,
-            expires_in: @access_token.expires_in,
-            scope: @access_token.scope
+            id_token: access_token.id_token,
+            token: access_token.access_token,
+            refresh_token: access_token.refresh_token,
+            expires_in: access_token.expires_in,
+            scope: access_token.scope
           }
         end
 
