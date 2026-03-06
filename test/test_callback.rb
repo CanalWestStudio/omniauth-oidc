@@ -10,7 +10,7 @@ class TestCallback < Minitest::Test
     @jwk_set = { keys: [@jwk] }
     @nonce = "test-nonce"
     @id_token = generate_id_token(standard_id_token_claims(nonce: @nonce), @key)
-    OmniAuth::Strategies::Oidc::Transport.instance_variable_set(:@connection, nil)
+    OmniAuth::Strategies::Oidc::Transport.reset!
   end
 
   # --- Error handling ---

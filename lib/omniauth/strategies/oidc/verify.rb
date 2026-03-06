@@ -36,7 +36,7 @@ module OmniAuth
         end
 
         def jwks_key
-          @_jwks_key ||= Transport.fetch_json(config.jwks_uri)
+          @jwks_key ||= Transport.fetch_json(config.jwks_uri)
         end
 
         def base64_decoded_jwt_secret
@@ -138,6 +138,9 @@ module OmniAuth
           UrlSafeBase64.decode64(str).unpack1("B*").to_i(2).to_s
         end
 
+        # Converts camelCase keys to snake_case symbols. Handles standard OIDC
+        # claim names (e.g. "givenName" → :given_name). Does not handle acronym
+        # runs like "HTTPSEnabled" — not expected in OIDC responses.
         def deep_underscore_keys(hash)
           hash.each_with_object({}) do |(key, value), result|
             new_key = key.to_s.gsub(/([A-Z])/, '_\1').sub(/^_/, "").downcase.to_sym

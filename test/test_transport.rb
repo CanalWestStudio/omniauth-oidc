@@ -4,7 +4,7 @@ require "test_helper"
 
 class TestTransport < Minitest::Test
   def setup
-    OmniAuth::Strategies::Oidc::Transport.instance_variable_set(:@connection, nil)
+    OmniAuth::Strategies::Oidc::Transport.reset!
   end
 
   def test_get_request

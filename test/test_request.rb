@@ -6,7 +6,7 @@ class TestRequest < Minitest::Test
   include OidcTestHelper
 
   def setup
-    OmniAuth::Strategies::Oidc::Transport.instance_variable_set(:@connection, nil)
+    OmniAuth::Strategies::Oidc::Transport.reset!
     stub_config_endpoint
   end
 

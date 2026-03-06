@@ -6,7 +6,7 @@ class TestSerializer < Minitest::Test
   include OidcTestHelper
 
   def setup
-    OmniAuth::Strategies::Oidc::Transport.instance_variable_set(:@connection, nil)
+    OmniAuth::Strategies::Oidc::Transport.reset!
   end
 
   def test_serialized_request_options_structure

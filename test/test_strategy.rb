@@ -151,7 +151,7 @@ class TestStrategy < Minitest::Test
     env = Rack::MockRequest.env_for("http://example.com/")
     env["rack.session"] = session
     strategy.call!(env)
-  rescue StandardError
-    # Swallow — we're just initializing internal state
+  rescue WebMock::NetConnectNotAllowedError, OmniAuth::Error, OmniAuth::Strategies::Oidc::CallbackError
+    # Expected during init — strategy needs env set up but won't complete a full phase
   end
 end

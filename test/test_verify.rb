@@ -8,7 +8,7 @@ class TestVerify < Minitest::Test
   def setup
     @key, @jwk = generate_rsa_keypair
     @jwk_set = { keys: [@jwk] }
-    OmniAuth::Strategies::Oidc::Transport.instance_variable_set(:@connection, nil)
+    OmniAuth::Strategies::Oidc::Transport.reset!
   end
 
   def test_decode_id_token_with_rs256
@@ -198,7 +198,7 @@ class TestVerify < Minitest::Test
     env = Rack::MockRequest.env_for(url)
     env["rack.session"] = session
     strategy.call!(env)
-  rescue StandardError
-    # Swallow errors during init — we're just setting up internal state
+  rescue WebMock::NetConnectNotAllowedError, OmniAuth::Error, OmniAuth::Strategies::Oidc::CallbackError
+    # Expected during init — strategy needs env set up but won't complete a full phase
   end
 end

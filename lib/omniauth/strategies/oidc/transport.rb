@@ -37,6 +37,10 @@ module OmniAuth
           response = get(url, headers: headers)
           JSON.parse(response.body)
         end
+
+        def reset!
+          @connection = nil
+        end
       end
     end
   end
