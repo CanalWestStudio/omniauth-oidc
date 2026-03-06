@@ -35,7 +35,6 @@ Gem::Specification.new do |spec|
   spec.add_dependency "faraday-net_http_persistent", "~> 2.0"
   spec.add_dependency "faraday-retry", "~> 2.0"
   spec.add_dependency "omniauth"
-  spec.add_dependency "openid_config_parser"
   spec.add_dependency "openid_connect"
 
   # For more information and examples about making a new gem, check out our
