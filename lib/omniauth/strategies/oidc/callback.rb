@@ -91,13 +91,9 @@ module OmniAuth
           @configured_response_type ||= options.response_type.to_s
         end
 
-        # Parse response from OIDC endpoint and set client options for callback phase
         def set_client_options_for_callback_phase
-          client.host = host
+          configure_discovery_endpoints(client)
           client.redirect_uri = redirect_uri
-          client.authorization_endpoint = config.authorization_endpoint
-          client.token_endpoint = config.token_endpoint
-          client.userinfo_endpoint = config.userinfo_endpoint
         end
 
         def error_handler
