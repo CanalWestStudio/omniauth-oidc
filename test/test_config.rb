@@ -20,7 +20,7 @@ class TestConfig < Minitest::Test
     assert_equal "#{ISSUER}/userinfo", config.userinfo_endpoint
     assert_equal "#{ISSUER}/jwks", config.jwks_uri
     assert_equal "#{ISSUER}/logout", config.end_session_endpoint
-    assert_equal ["openid", "email", "profile"], config.scopes_supported
+    assert_equal [ "openid", "email", "profile" ], config.scopes_supported
   end
 
   def test_fetch_handles_string_keys

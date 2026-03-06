@@ -22,3 +22,5 @@ test/version_tmp
 Gemfile.lock
 .tool-versions
 .DS_Store
+.claude/
+mise.toml

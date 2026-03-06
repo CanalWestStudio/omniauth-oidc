@@ -1,5 +1,8 @@
 # OmniAuth::Oidc
 
+[![CI](https://github.com/CanalWestStudio/omniauth-oidc/actions/workflows/pull_request.yml/badge.svg)](https://github.com/CanalWestStudio/omniauth-oidc/actions/workflows/pull_request.yml)
+[![Gem Version](https://badge.fury.io/rb/omniauth-oidc.svg)](https://badge.fury.io/rb/omniauth-oidc)
+
 An OmniAuth strategy for OpenID Connect (OIDC) authentication. Supports multiple OIDC providers, PKCE, RP-Initiated Logout, and automatic discovery via the provider's configuration endpoint.
 
 Requires Ruby 3.1+.
