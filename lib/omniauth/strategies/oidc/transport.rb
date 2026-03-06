@@ -1,38 +1,41 @@
-require 'uri'
-require 'json'
-require 'httparty'
-require_relative './utils'
+# frozen_string_literal: true
+
+require "faraday"
+require "faraday/net_http_persistent"
+require "faraday/retry"
 
 module OmniAuth
   module Strategies
-    class Transport
-      include HTTParty
-      ssl_version :TLSv1_2
+    class Oidc
+      # HTTP transport layer using Faraday
+      module Transport
+        module_function
 
-      def self.request(method, url, headers=nil, body=nil, isBuildResponse=true)
-        uri = URI(url)
-
-        user_agent_header = {
-          'User-Agent': OmniauthOidc::USER_AGENT
-        }
-        req_headers = headers.nil? ? user_agent_header : user_agent_header.merge!(headers)
-
-        if method == 'GET'
-          response = get(url,
-            headers: req_headers
-          )
-
-        elsif method == 'POST'
-          response = post(url,
-            headers: req_headers,
-            body: body
-          )
+        def connection
+          @connection ||= Faraday.new do |f|
+            f.request :retry, max: 2, interval: 0.5, backoff_factor: 2
+            f.headers["User-Agent"] = OmniauthOidc::USER_AGENT
+            f.ssl.min_version = OpenSSL::SSL::TLS1_2_VERSION
+            f.adapter :net_http_persistent
+          end
         end
 
-        if isBuildResponse == true
-          Utils.build_response_object(response)
-        else
-          response
+        def get(url, headers: {})
+          connection.get(url) do |req|
+            req.headers.merge!(headers)
+          end
+        end
+
+        def post(url, headers: {}, body: nil)
+          connection.post(url) do |req|
+            req.headers.merge!(headers)
+            req.body = body
+          end
+        end
+
+        def fetch_json(url, headers: {})
+          response = get(url, headers: headers)
+          JSON.parse(response.body)
         end
       end
     end
