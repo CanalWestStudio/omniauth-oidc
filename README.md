@@ -1,315 +1,209 @@
 # OmniAuth::Oidc
 
-This gem provides an OmniAuth strategy for integrating OpenID Connect (OIDC) authentication into your Ruby on Rails application. It allows seamless login using various OIDC providers.
+An OmniAuth strategy for OpenID Connect (OIDC) authentication. Supports multiple OIDC providers, PKCE, RP-Initiated Logout, and automatic discovery via the provider's configuration endpoint.
 
-Developed with reference to [omniauth-openid-connect](https://github.com/jjbohn/omniauth-openid-connect) and [omniauth_openid_connect](https://github.dev/omniauth/omniauth_openid_connect).
-
-[Article on Medium](https://msuliq.medium.com/authenticating-with-omniauth-and-openid-connect-oidc-in-ruby-on-rails-applications-e136ec5b48c0) about the development of this gem.
+Requires Ruby 3.1+.
 
 ## Installation
 
-To install the gem run the following command in the terminal:
-
     $ bundle add omniauth-oidc
 
-If bundler is not being used to manage dependencies, install the gem by executing:
+Or install directly:
 
     $ gem install omniauth-oidc
 
+## Configuration
 
-## Usage
-
-To use the OmniAuth OIDC strategy, you need to configure your Rails application and set up the necessary environment variables for OIDC client credentials.
-
-### Configuration
-You have to provide Client ID, Client Secret and url for the OIDC configuration endpoint as a bare minimum for the `omniauth-oidc` to work properly.
-Create an initializer file at `config/initializers/omniauth.rb`
+You need a Client ID, Client Secret, and the OIDC configuration endpoint URL at minimum.
 
 ```ruby
 # config/initializers/omniauth.rb
 Rails.application.config.middleware.use OmniAuth::Builder do
   provider :oidc, {
-    name: :simple_provider, # used for dynamic routing
+    name: :my_provider,
     client_options: {
-      identifier: '23575f4602bebbd9a17dbc38d85bd1a77',
-      secret: ENV['SIMPLE_PROVIDER_CLIENT_SECRET'],
-      config_endpoint: 'https://simpleprovider.com/cdn-cgi/access/sso/oidc/23575f4602bebbd9a17dbc38d85bd1a77/.well-known/openid-configuration'
+      identifier: ENV["MY_PROVIDER_CLIENT_ID"],
+      secret: ENV["MY_PROVIDER_CLIENT_SECRET"],
+      config_endpoint: "https://provider.example.com/.well-known/openid-configuration"
     }
   }
 end
 ```
 
-With Devise
+With Devise:
 
 ```ruby
 Devise.setup do |config|
   config.omniauth :oidc, {
-    name: :simple_provider,
-    scope: [:openid, :email, :profile, :address],
-    response_type: :code,
+    name: :my_provider,
+    scope: [:openid, :email, :profile],
     uid_field: "preferred_username",
     client_options: {
-      identifier: '23575f4602bebbd9a17dbc38d85bd1a77',
-      secret: ENV['SIMPLE_PROVIDER_CLIENT_SECRET'],
-      config_endpoint: 'https://simpleprovider.com/cdn-cgi/access/sso/oidc/23575f4602bebbd9a17dbc38d85bd1a77/.well-known/openid-configuration'
+      identifier: ENV["MY_PROVIDER_CLIENT_ID"],
+      secret: ENV["MY_PROVIDER_CLIENT_SECRET"],
+      config_endpoint: "https://provider.example.com/.well-known/openid-configuration"
     }
   }
 end
 ```
 
-The gem also supports a wide range of optional parameters for higher degree of configurability.
+The gem fetches authorization, token, userinfo, and JWKS endpoints automatically from the `config_endpoint`. You can override any of them explicitly in `client_options` if needed.
+
+The gem does not accept `redirect_uri` as a configurable option — it is built dynamically from the provider `name` (see [Routes](#routes)).
+
+### All Options
+
+| Option | Description | Default |
+|---|---|---|
+| `name` | Provider identifier, used in route paths | `:oidc` |
+| `issuer` | Expected token issuer | Fetched from `config_endpoint` |
+| `scope` | OIDC scopes | `[:openid]` |
+| `response_type` | `"code"` or `"id_token"` | `"code"` |
+| `response_mode` | `:query`, `:fragment`, `:form_post`, or `:web_message` | `nil` |
+| `display` | `:page`, `:popup`, `:touch`, or `:wap` | `nil` |
+| `prompt` | `:none`, `:login`, `:consent`, or `:select_account` | `nil` |
+| `require_state` | Verify the `state` parameter on callbacks | `true` |
+| `state` | Custom state value or a `Proc` that returns one | Random 16-byte hex |
+| `send_nonce` | Include a nonce in the authorization request | `true` |
+| `fetch_user_info` | Fetch user info from the userinfo endpoint | `true` |
+| `uid_field` | User info field to use as `uid` | `"sub"` |
+| `send_scope_to_token_endpoint` | Include scope in the token request | `true` |
+| `client_auth_method` | Auth method for the token endpoint (e.g. `:basic`, `:jwks`) | `:basic` |
+| `pkce` | Enable PKCE (S256) | `false` |
+| `pkce_verifier` | Custom PKCE verifier `Proc` | Random 128-char hex |
+| `pkce_options` | Custom code challenge generation `Proc` and method | SHA256 / `"S256"` |
+| `extra_authorize_params` | Hash of extra params merged into the authorization request | `{}` |
+| `allow_authorize_params` | List of dynamic param keys allowed from the request | `[]` |
+| `acr_values` | Authentication Class Reference values ([RFC 9470](https://www.rfc-editor.org/rfc/rfc9470.html)) | `nil` |
+| `logout_path` | Path that triggers RP-Initiated Logout | `"/logout"` |
+| `post_logout_redirect_uri` | Where to redirect after provider logout | `nil` |
+| `client_signing_alg` | Expected JWT signing algorithm (e.g. `:RS256`) | `nil` (any) |
+| `jwt_secret_base64` | Base64-encoded secret for HMAC signing algorithms | `client_options.secret` |
+| `client_jwk_signing_key` | JWK key for JWT verification | `nil` |
+| `client_x509_signing_key` | X.509 certificate for JWT verification | `nil` |
+
+### Client Options
+
+| Option | Description | Default |
+|---|---|---|
+| `identifier` | OAuth 2.0 client ID | **required** |
+| `secret` | OAuth 2.0 client secret | **required** |
+| `config_endpoint` | OIDC discovery endpoint URL | **required** |
+| `scheme` | HTTP scheme | `"https"` |
+| `host` | Authorization server host | From `config_endpoint` |
+| `port` | Authorization server port | `443` |
+| `authorization_endpoint` | Override discovered authorize URL | From `config_endpoint` |
+| `token_endpoint` | Override discovered token URL | From `config_endpoint` |
+| `userinfo_endpoint` | Override discovered userinfo URL | From `config_endpoint` |
+| `jwks_uri` | Override discovered JWKS URL | From `config_endpoint` |
+| `end_session_endpoint` | Provider logout URL | From `config_endpoint` |
+| `environment` | Custom environment param sent with authorization requests | `nil` |
+
+## Routes
+
+The callback URL follows the pattern `https://your-app.com/auth/<name>/callback`, where `<name>` is the provider name from your configuration. Register this URL with your OIDC provider as an allowed redirect URI.
 
 ```ruby
-# config/initializers/omniauth.rb
-Rails.application.config.middleware.use OmniAuth::Builder do
-  provider :oidc, {
-    name: :complex_provider, # used for dynamic routing
-    issuer: 'https://complexprovider.com/cdn-cgi/access/sso/oidc/23575f4602bebbd9a17dbc38d85bd1a77',
-    scope: [:openid],
-    response_type: 'id_token',
-    require_state: true,
-    response_mode: :query,
-    prompt: :login,
-    send_nonce: false,
-    uid_field: "sub",
-    pkce: false,
-    client_options: {
-      identifier: '23575f4602bebbd9a17dbc38d85bd1a77',
-      secret: ENV['COMPLEX_PROVIDER_CLIENT_SECRET'],
-      config_endpoint: 'https://complexprovider.com/cdn-cgi/access/sso/oidc/23575f4602bebbd9a17dbc38d85bd1a77/.well-known/openid-configuration',
-      host: 'complexprovider.com'
-      scheme: "https",
-      port: 443,
-      authorization_endpoint: 'https://complexprovider.com/cdn-cgi/access/sso/oidc/23575f4602bebbd9a17dbc38d85bd1a77/authorization',
-      token_endpoint: 'https://complexprovider.com/cdn-cgi/access/sso/oidc/23575f4602bebbd9a17dbc38d85bd1a77/token',
-      userinfo_endpoint: 'https://complexprovider.com/cdn-cgi/access/sso/oidc/23575f4602bebbd9a17dbc38d85bd1a77/userinfo',
-      jwks_uri: 'https://complexprovider.com/cdn-cgi/access/sso/oidc/23575f4602bebbd9a17dbc38d85bd1a77/jwks',
-      end_session_endpoint: '/signout'
-    }
-  }
+# config/routes.rb
+Rails.application.routes.draw do
+  match "auth/:provider/callback", to: "callbacks#omniauth", via: [:get, :post]
 end
 ```
 
-Ensure to replace identifier, secret, configuration endpoint url and others with credentials received from your OIDC provider.
-Please note that the gem does not accept `redirect_uri` as a configurable option. For details please see section Routes.
-
-### Redirecting for Authentication
-
-Buttons and links to initialize the authentication request can be placed on relevant pages as below:
+To initiate authentication, use a POST link (OmniAuth requires POST for CSRF protection):
 
 ```ruby
-<%= button_to "Login with Simple Provider", "/auth/simple_provider" %>
+<%= button_to "Login with My Provider", "/auth/my_provider" %>
 ```
 
-### Handling Callbacks
-
-The gem uses dyanmic routes to handle different phases, and while you can use same routes in your Rails application, for
-better experience you should have a controller to process the authenticated user. Create a CallbacksController:
+## Handling Callbacks
 
 ```ruby
-# app/controllers/callbacks_controller.rb
 class CallbacksController < ApplicationController
   def omniauth
-    # user info received from OIDC provider will be available in `request.env['omniauth.auth']`
-    auth = request.env['omniauth.auth']
+    auth = request.env["omniauth.auth"]
 
-    user = User.find_or_create_by(uid: auth['uid']) do |user|
-      user.name = auth['info']['name']
-      user.email = auth['info']['email']
+    user = User.find_or_create_by(uid: auth["uid"]) do |u|
+      u.name = auth["info"]["name"]
+      u.email = auth["info"]["email"]
     end
 
     session[:user_id] = user.id
-    redirect_to root_path, notice: 'Successfully logged in!'
+    redirect_to root_path, notice: "Logged in"
   end
 end
 ```
 
-### Routes
+### Access Token Only (No User Info)
 
-The gem uses dynamic routes when making requests to the OIDC provider endpoints, so called `redirect_uri` which is a
-non-configurable value that follows the naming pattern of `https://your_app.com/auth/<simple_provider>/callback`, 
-where `<simple_provider>` is the provider name defined within the configuration of the `omniauth.rb` initializer.
-This represents the `redirect_uri` that will be passed with the authorization request to your OIDC provider and that
-has to be registered with your OIDC provider as permitted `redirect_uri`.
-
-Dynamic routes are used to process responses and perform intermediary steps by the middleware, e.g. request phase,
-token verification. While you can define and use same routes within your Rails app, it is highly recommended to modify 
-your `routes.rb` to perform a dynamic redirect to a another controller method so this does not cause any conflicts with
-the middleware or the authorization flow.
-
-In an example below, `auth/:provider/callback` is generalized `redirect_uri` value that is passed in the authorization
-flow, while all OIDC provider responses are ultimately redirected to the `omniauth` method of the `callbacks_controller`,
-which could be a "Swiss army knife" method to handle authentication or user data from various omniauth providers:
+Set `fetch_user_info: false` to skip the userinfo endpoint. The callback will contain only credentials:
 
 ```ruby
-# config/routes.rb
-Rails.application.routes.draw do
-  match 'auth/:provider/callback', via: :get, to: "callbacks#omniauth"
-end
-```
-
-Alternatively, you can specify separate redirects for some of your OIDC providers, in case you need to handle responses
-differently:
-
-```ruby
-# config/routes.rb
-Rails.application.routes.draw do
-  match 'auth/simple_provider/callback', via: :get, to: "callbacks#simple_provider"
-  match 'auth/complex_provider/callback', via: :get, to: "callbacks#complex_provider"
-
-  # you can add the line below if you would like the rest of the providers to be redirected to a universal `omniauth` method
-  match 'auth/:provider/callback', via: :get, to: "callbacks#omniauth"
-end
-```
-
-**Please note that you should register `https://your_app.com/auth/<simple_provider>/callback` with your OIDC provider
-as a callback redirect url.**
-
-### Using Access Token Without User Info
-
-In case your app requries only an access token and not the user information, then you can specify an optional
-configuration in the omniauth initializer:
-
-```ruby
-# config/initializers/omniauth.rb
-Rails.application.config.middleware.use OmniAuth::Builder do
-  provider :oidc, {
-    name: :simple_provider_access_token_only,
-    fetch_user_info: false, # if not specified, default value of true will be applied
-    client_options: {
-      identifier: '23575f4602bebbd9a17dbc38d85bd1a77',
-      secret: ENV['SIMPLE_PROVIDER_CLIENT_SECRET'],
-      config_endpoint: 'https://simpleprovider.com/cdn-cgi/access/sso/oidc/23575f4602bebbd9a17dbc38d85bd1a77/.well-known/openid-configuration'
-    }
+provider :oidc, {
+  name: :my_provider,
+  fetch_user_info: false,
+  client_options: {
+    identifier: ENV["MY_PROVIDER_CLIENT_ID"],
+    secret: ENV["MY_PROVIDER_CLIENT_SECRET"],
+    config_endpoint: "https://provider.example.com/.well-known/openid-configuration"
   }
-end
+}
 ```
-
-Then the callback returned once your user authenticates with the OIDC provider will contain only access token parameters:
 
 ```ruby
-# app/controllers/callbacks_controller.rb
-class CallbacksController < ApplicationController
-  def omniauth
-    # access token parameters received from OIDC provider will be available in `request.env['omniauth.auth']`
-    omniauth_params = request.env['omniauth.auth']
-
-    # omniauth_params will contain similar data as shown below
-    # {"provider"=>:simple_provider_access_token_only,
-    #  "credentials"=>
-    #   {"id_token"=> "id token value",
-    #    "token"=> "token value",
-    #    "refresh_token"=>"refresh token value",
-    #    "expires_in"=>300,
-    #    "scope"=>nil
-    #   }
-    # }
-  end
-end
+# request.env["omniauth.auth"] will contain:
+# {
+#   "provider" => :my_provider,
+#   "credentials" => {
+#     "id_token" => "...",
+#     "token" => "...",
+#     "refresh_token" => "...",
+#     "expires_in" => 300,
+#     "scope" => nil
+#   }
+# }
 ```
 
-### Ending Session
+## RP-Initiated Logout
 
-The gem provides two configuration options to allow ending a session simultaneously with your client application and the
-OIDC provider.
+To log the user out of both your application and the OIDC provider, configure `logout_path` and `end_session_endpoint`:
 
-To use this feature, you need to provide a `logout_path` in the options and an `end_session_endpoint` in the client 
-options. Here’s a sample setup:
-
-``` ruby
-  provider :oidc, {
-    name: :simple_provider,
-    client_options: {
-      identifier: ENV['SIMPLE_PROVIDER_CLIENT_ID'],
-      secret: ENV['SIMPLE_PROVIDER_SECRET'],
-      config_endpoint: 'https://simpleprovider.com/1234567890/.well-known/openid-configuration',
-      end_session_endpoint: 'https://simpleprovider.com/signout' # URL to end session with OIDC provider
-    },
-    logout_path: '/logout' # path in your application to end user session
+```ruby
+provider :oidc, {
+  name: :my_provider,
+  logout_path: "/logout",
+  post_logout_redirect_uri: "https://your-app.com/signed_out",
+  client_options: {
+    identifier: ENV["MY_PROVIDER_CLIENT_ID"],
+    secret: ENV["MY_PROVIDER_CLIENT_SECRET"],
+    config_endpoint: "https://provider.example.com/.well-known/openid-configuration",
+    end_session_endpoint: "https://provider.example.com/signout"
   }
+}
 ```
 
-* `end_session_endpoint` is the URL to which your client app can redirect to log out the user from the OIDC provider's application. It can be dynamically fetched from the `config_endpoint` response if your OIDC provider specifies it there. Alternatively, you can explicitly provide it in the client options.
+When a request matches `logout_path`, the gem redirects to the provider's `end_session_endpoint` with `id_token_hint` (from the session) and `post_logout_redirect_uri` if configured.
 
-* `logout_path` is the URL in your application that can be called to terminate the current user's session.
+The `end_session_endpoint` can also be discovered automatically from the `config_endpoint` if the provider advertises it.
 
-Using these two configurations, you can ensure that when a user logs out from your application, they are also logged out
-from the OIDC provider, providing a seamless logout across multiple services.
-
-This works by calling `other_phase` on every controller request in your application. The method checks if the requested 
-URL matches the defined `logout_path`. If it does (i.e. current user has requested to log out from your application) 
-`other_phase` performs a redirect to the `end_session_endpoint` to terminate the user's session with the OIDC provider 
-and then it returns back to your application and concludes the request to end the current user's session.
-
-For additional details please refer to the [OIDC specification](https://openid.net/specs/openid-connect-session-1_0-17.html#:~:text=%C2%A0TOC-,5.%C2%A0%20RP%2DInitiated%20Logout,-An%20RP%20can).
-
-### Advanced Configuration
-You can customize the OIDC strategy further by adding additional configuration options:
-
-| Field                        | Description                                                                                                                                                           | Required                | Default Value                       | Example/Notes                                         |
-|------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|-------------------------------------|-------------------------------------------------------|
-| name                         | Arbitrary string to identify OIDC provider and segregate it from other OIDC providers                                                                                 | no                      | `"oidc"`                            | `:simple_provider`                                    |
-| issuer                       | Root url for the OIDC authorization server                                                                                                                            | no                      | retrived from config_endpoint       | `"https://simpleprovider.com"`                        |
-| fetch_user_info              | Fetches user information from user_info_endpoint using the access token. If set to false the omniauth params will include only access token                           | no                      | `true`                              | `fetch_user_info: false`                              |
-| client_auth_method           | Authentication method to be used with the OIDC authorization server                                                                                                   | no                      | `:basic`                            | `"basic"`, `"jwks"`                                   |
-| scope                        | OIDC scopes to be included in the server's response                                                                                                                   | `[:openid]` is required | all scopes offered by OIDC provider | `[:openid, :profile, :email]`                         |
-| response_type                | OAuth2 response type expected from OIDC provider during authorization                                                                                                 | no                      | `"code"`                            | `"code"` or `"id_token"`                              |
-| state                        | Value to be used for the OAuth2 state parameter on the authorization request. Can be a proc that generates a string                                                   | no                      | Random 16 character string          | `Proc.new { SecureRandom.hex(32) }`                   |
-| require_state                | Boolean to indicate if state param should be verified. This is a recommendation by OIDC spec                                                                          | no                      | `true`                              | `true` or `false`                                     |
-| response_mode                | The response mode per [OIDC spec](https://openid.net/specs/oauth-v2-form-post-response-mode-1_0.html)                                                                 | no                      | `nil`                               | `:query`, `:fragment`, `:form_post` or `:web_message` |
-| display                      | Specifies how OIDC authorization server should display the authentication and consent UI pages to the end user                                                        | no                      | `nil`                               | `:page`, `:popup`, `:touch` or `:wap`                 |
-| prompt                       | Specifies whether the OIDC authorization server prompts the end user for reauthentication and consent                                                                 | no                      | `nil`                               | `:none`, `:login`, `:consent` or `:select_account`    |
-| send_scope_to_token_endpoint | Should the scope parameter be sent to the authorization token endpoint                                                                                                | no                      | `true`                              | `true` or `false`                                     |
-| post_logout_redirect_uri     | Logout redirect uri to use per the [session management draft](https://openid.net/specs/openid-connect-session-1_0.html)                                               | no                      | `nil`                               | `"https://your_app.com/logout/callback"`              |
-| uid_field                    | Field of the user info response to be used as a unique ID                                                                                                             | no                      | `'sub'`                             | `"sub"` or `"preferred_username"`                     |
-| extra_authorize_params       | Hash of extra fixed parameters that will be merged to the authorization request                                                                                       | no                      | `{}`                                | `{"tenant" => "common"}`                              |
-| allow_authorize_params       | List of allowed dynamic parameters that will be merged to the authorization request                                                                                   | no                      | `[]`                                | `[:screen_name]`                                      |
-| pkce                         | Enable [PKCE flow](https://oauth.net/2/pkce/)                                                                                                                         | no                      | `false`                             | `true` or `false`                                     |
-| pkce_verifier                | Specify custom PKCE verifier code                                                                                                                                     | no                      | Random 128-character string         | `Proc.new { SecureRandom.hex(64) }`                   |
-| pkce_options                 | Specify custom implementation of the PKCE code challenge/method                                                                                                       | no                      | SHA256(code_challenge) in hex       | Proc to customise the code challenge generation       |
-| client_options               | Hash of client options detailed below in a separate table                                                                                                             | yes                     | see below                           | see below                                             |
-| jwt_secret_base64            | Specify the base64-encoded secret used to sign the JWT token for HMAC with SHA2 (e.g. HS256) signing algorithms                                                       | no                      | `client_options.secret`             | `"bXlzZWNyZXQ=\n"`                                    |
-| logout_path                  | Log out is only triggered when the request path ends on this path                                                                                                     | no                      | `'/logout'`                         | '/sign_out'                                           |
-| acr_values                   | Authentication Class Reference (ACR) values to be passed to the authorize_uri to enforce a specific level, see [RFC9470](https://www.rfc-editor.org/rfc/rfc9470.html) | no                      | `nil`                               | `"c1 c2"`                                             å|
-
-
-Below are options for the `client_options` hash of the configuration:
-
-| Field                  | Description                                                 | Required | Default value                 |
-|------------------------|-------------------------------------------------------------|----------|-------------------------------|
-| identifier             | OAuth2 client_id                                            |    yes   | `nil`                         |
-| secret                 | OAuth2 client secret                                        |    yes   | `nil`                         |
-| config_endpoint        | OIDC configuration endpoint                                 |    yes   | `nil`                         |
-| scheme                 | http scheme to use                                          |     no   | https                         |
-| host                   | host of the authorization server                            |     no   | nil                           |
-| port                   | port for the authorization server                           |     no   | 443                           |
-| authorization_endpoint | authorize endpoint on the authorization server              |     no   | retrived from config_endpoint |
-| token_endpoint         | token endpoint on the authorization server                  |     no   | retrived from config_endpoint |
-| userinfo_endpoint      | user info endpoint on the authorization server              |     no   | retrived from config_endpoint |
-| jwks_uri               | jwks_uri on the authorization server                        |     no   | retrived from config_endpoint |
-| end_session_endpoint   | url to call to log the user out at the authorization server |     no   | `nil`                         |
+See the [OIDC RP-Initiated Logout spec](https://openid.net/specs/openid-connect-rpinitiated-1_0.html) for details.
 
 ## Security
 
 ### What the gem handles
 
-The gem provides the following security measures out of the box:
-
-- **TLS 1.2+** — All HTTP requests enforce TLS 1.2 as the minimum version, allowing TLS 1.3 negotiation
-- **CSRF/State validation** — The `state` parameter is verified on callbacks to prevent cross-site request forgery. Enabled by default via `require_state: true`
-- **Nonce verification** — Session-stored nonce is used for ID token verification, never from request params
-- **PKCE support** — Proof Key for Code Exchange (S256) is available via `pkce: true`
+- **TLS 1.2+** — All HTTP requests enforce a minimum of TLS 1.2, allowing TLS 1.3 negotiation
+- **State validation** — The `state` parameter is verified on callbacks to prevent CSRF (enabled by default)
+- **Nonce verification** — A session-stored nonce is used for ID token verification; nonces from request params are never accepted
+- **PKCE** — Proof Key for Code Exchange (S256) is available via `pkce: true`
 - **Security headers** — All redirects include `Cache-Control: no-cache, no-store`, `Pragma: no-cache`, and `Referrer-Policy: no-referrer`
-- **RP-Initiated Logout** — Sends `id_token_hint` with end session requests per the OIDC specification
-- **No `open-uri`** — The gem does not use `open-uri`, avoiding the `Kernel.open` security risk
+- **RP-Initiated Logout** — Sends `id_token_hint` with end-session requests per the OIDC spec
+- **No `open-uri`** — The gem avoids `Kernel.open` by using Faraday for all HTTP
 
 ### Host application responsibilities
 
-The following security measures must be configured in your application, as they fall outside the gem's scope:
-
 **Session and cookie security:**
-- Configure session cookies with `Secure` and `HttpOnly` flags
-- Set `SameSite=Lax` or `SameSite=Strict` on cookies
+- Configure session cookies with `Secure`, `HttpOnly`, and `SameSite=Lax` (or `Strict`)
 - In Rails: `config.session_store :cookie_store, secure: true, httponly: true, same_site: :lax`
 
 **HTTPS:**
@@ -317,29 +211,22 @@ The following security measures must be configured in your application, as they 
 - In Rails: `config.force_ssl = true`
 
 **Token storage:**
-- Encrypt refresh tokens at rest if persisted (e.g., AES-256)
+- Encrypt refresh tokens at rest if persisted (e.g. AES-256-GCM)
 - Store encryption keys separately from encrypted data
 - Never log OAuth tokens or user credentials
 
 **Input handling:**
-- Sanitize any user info from the OIDC provider before rendering in views (XSS prevention)
-- Use parameterized queries when storing user data (SQL injection prevention)
-
-**HTTP methods:**
-- Disable TRACE and other unused HTTP methods on your web server
+- Sanitize user info from the OIDC provider before rendering in views
+- Use parameterized queries when storing user data
 
 ### Reporting vulnerabilities
 
-If you discover a security vulnerability, please report it privately via GitHub Security Advisories rather than opening a public issue.
+If you discover a security vulnerability, please report it privately via [GitHub Security Advisories](https://github.com/CanalWestStudio/omniauth-oidc/security/advisories) rather than opening a public issue.
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/msuliq/omniauth-oidc. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [code of conduct](https://github.com/msuliq/omniauth-oidc/blob/main/CODE_OF_CONDUCT.md).
+Bug reports and pull requests are welcome on GitHub at https://github.com/CanalWestStudio/omniauth-oidc. Contributors are expected to adhere to the [code of conduct](https://github.com/CanalWestStudio/omniauth-oidc/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 
-The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
-
-## Code of Conduct
-
-Everyone interacting in the OmniauthOidc project's codebases, issue trackers, chat rooms and mailing lists is expected to follow the [code of conduct](https://github.com/msuliq/omniauth-oidc/blob/main/CODE_OF_CONDUCT.md).
+Available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
