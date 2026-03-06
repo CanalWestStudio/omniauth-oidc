@@ -1,8 +1,9 @@
+# frozen_string_literal: true
+
 module OmniAuth
   module Strategies
     class Oidc
       module Serializer
-
         def serialized_access_token_auth_hash
           {
             provider: name,

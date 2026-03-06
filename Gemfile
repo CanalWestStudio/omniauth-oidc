@@ -2,19 +2,15 @@
 
 source "https://rubygems.org"
 
-if Gem::Version.new(RUBY_VERSION.dup) >= Gem::Version.new("3.1")
-  gem "net-imap", require: false
-  gem "net-pop", require: false
-  gem "net-smtp", require: false
-end
-
 gemspec
 
 group :development, :test do
   gem "bundle-audit"
   gem "minitest"
+  gem "rack-test"
   gem "rake"
   gem "rubocop"
   gem "rubocop-rails-omakase", require: false, group: [ :development ]
+  gem "simplecov", require: false
   gem "webmock"
 end

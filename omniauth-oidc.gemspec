@@ -13,7 +13,7 @@ Gem::Specification.new do |spec|
     suited for multiple OIDC providers."
   spec.homepage = "https://github.com/CanalWestStudio/omniauth-oidc"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 2.7.0"
+  spec.required_ruby_version = ">= 3.1.0"
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "https://github.com/msuliq/omniauth-oidc"
@@ -31,8 +31,9 @@ Gem::Specification.new do |spec|
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = [ "lib" ]
 
-  # Uncomment to register a new dependency of your gem
-  spec.add_dependency "httparty"
+  spec.add_dependency "faraday", "~> 2.0"
+  spec.add_dependency "faraday-net_http_persistent", "~> 2.0"
+  spec.add_dependency "faraday-retry", "~> 2.0"
   spec.add_dependency "omniauth"
   spec.add_dependency "openid_config_parser"
   spec.add_dependency "openid_connect"
