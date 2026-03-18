@@ -2,6 +2,7 @@
 
 require "base64"
 require "timeout"
+require "oauth2"
 require "omniauth"
 require "openid_connect"
 require "forwardable"
@@ -128,6 +129,19 @@ module OmniAuth
       # Initialize OpenIDConnect Client with options
       def client
         @client ||= ::OpenIDConnect::Client.new(client_options)
+      end
+
+      # Returns an OAuth2::Client (from the oauth2 gem) configured with the
+      # discovered token endpoint. Useful for token refresh flows where
+      # OAuth2::AccessToken requires an OAuth2::Client rather than the
+      # OpenIDConnect/Rack::OAuth2 client returned by #client.
+      def oauth2_client
+        @oauth2_client ||= ::OAuth2::Client.new(
+          client_options.identifier,
+          client_options.secret,
+          site: config.issuer,
+          token_url: config.token_endpoint
+        )
       end
 
       # Config is built from the JSON response from the OIDC config endpoint
