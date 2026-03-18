@@ -141,6 +141,32 @@ class TestStrategy < Minitest::Test
     assert_equal "my-id", client.identifier
   end
 
+  def test_oauth2_client_returns_oauth2_client
+    strategy = build_app(
+      client_options: {
+        identifier: "my-id",
+        secret: "my-secret"
+      }
+    )
+    stub_config_endpoint
+    init_strategy(strategy)
+
+    oauth2_client = strategy.oauth2_client
+
+    assert_instance_of OAuth2::Client, oauth2_client
+    assert_equal "my-id", oauth2_client.id
+    assert_equal "my-secret", oauth2_client.secret
+    assert_equal "#{ISSUER}/token", oauth2_client.token_url
+  end
+
+  def test_oauth2_client_is_memoized
+    strategy = build_app
+    stub_config_endpoint
+    init_strategy(strategy)
+
+    assert_same strategy.oauth2_client, strategy.oauth2_client
+  end
+
   def test_version_is_semver
     assert_match(/\A\d+\.\d+\.\d+\z/, OmniauthOidc::VERSION)
   end
