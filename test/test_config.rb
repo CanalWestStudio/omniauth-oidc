@@ -7,6 +7,7 @@ class TestConfig < Minitest::Test
 
   def setup
     OmniAuth::Strategies::Oidc::Transport.reset!
+    OmniauthOidc::Config.clear_cache!
   end
 
   def test_fetch_parses_discovery_document
@@ -67,5 +68,34 @@ class TestConfig < Minitest::Test
     config = OmniauthOidc::Config.fetch(CONFIG_ENDPOINT)
 
     refute_respond_to config, :some_unknown_field
+  end
+
+  def test_fetch_caches_result
+    stub = stub_config_endpoint
+
+    config1 = OmniauthOidc::Config.fetch(CONFIG_ENDPOINT)
+    config2 = OmniauthOidc::Config.fetch(CONFIG_ENDPOINT)
+
+    assert_same config1, config2
+    assert_requested stub, times: 1
+  end
+
+  def test_fetch_cache_expires_after_ttl
+    stub = stub_config_endpoint
+
+    OmniauthOidc::Config.fetch(CONFIG_ENDPOINT, ttl: 0)
+    OmniauthOidc::Config.fetch(CONFIG_ENDPOINT, ttl: 0)
+
+    assert_requested stub, times: 2
+  end
+
+  def test_clear_cache
+    stub = stub_config_endpoint
+
+    OmniauthOidc::Config.fetch(CONFIG_ENDPOINT)
+    OmniauthOidc::Config.clear_cache!
+    OmniauthOidc::Config.fetch(CONFIG_ENDPOINT)
+
+    assert_requested stub, times: 2
   end
 end
