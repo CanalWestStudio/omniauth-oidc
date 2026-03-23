@@ -3,7 +3,7 @@
 require_relative "lib/omniauth/oidc/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "omniauth-oidc"
+  spec.name = "omniauth-oidc-strategy"
   spec.version = OmniauthOidc::VERSION
   spec.authors = [ 'mc' ]
   spec.email = [ 'test@example.com' ]
