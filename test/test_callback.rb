@@ -11,6 +11,7 @@ class TestCallback < Minitest::Test
     @nonce = "test-nonce"
     @id_token = generate_id_token(standard_id_token_claims(nonce: @nonce), @key)
     OmniAuth::Strategies::Oidc::Transport.reset!
+    OmniauthOidc::Config.clear_cache!
   end
 
   # --- Error handling ---
