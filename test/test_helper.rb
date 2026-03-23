@@ -8,7 +8,7 @@ if ENV["COVERAGE"]
 end
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
-require "omniauth-oidc"
+require "omniauth-oidc-strategy"
 
 require "minitest/autorun"
 require "webmock/minitest"
