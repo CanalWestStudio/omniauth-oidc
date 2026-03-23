@@ -7,6 +7,7 @@ class TestSerializer < Minitest::Test
 
   def setup
     OmniAuth::Strategies::Oidc::Transport.reset!
+    OmniauthOidc::Config.clear_cache!
   end
 
   def test_serialized_request_options_structure

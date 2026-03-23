@@ -5,6 +5,11 @@ require "test_helper"
 class TestStrategy < Minitest::Test
   include OidcTestHelper
 
+  def setup
+    OmniAuth::Strategies::Oidc::Transport.reset!
+    OmniauthOidc::Config.clear_cache!
+  end
+
   def test_uid_field_defaults_to_sub
     strategy = build_app
     assert_equal "sub", strategy.options.uid_field

@@ -7,6 +7,7 @@ class TestRequest < Minitest::Test
 
   def setup
     OmniAuth::Strategies::Oidc::Transport.reset!
+    OmniauthOidc::Config.clear_cache!
     stub_config_endpoint
   end
 
